@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="text-success mb-0"><i class="bi bi-shop"></i> Red de Ventas y Emprendimiento</h3>
+  <a href="https://docs.google.com/spreadsheets/d/1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk/edit?usp=sharing" target="_blank" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Ver Google Sheet
+  </a>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 g-3">
+  {% for n in negocios %}
+  <div class="col">
+    <div class="card h-100 shadow-sm border-start border-success border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <h5 class="card-title fw-bold text-success mb-1">{{ n.giro }}</h5>
+          <span class="badge bg-light text-dark border">{{ n.padre_nombre }}</span>
+        </div>
+        <p class="card-text text-muted small mt-2"><strong>Beneficio para la comunidad:</strong> {{ n.descripcion_oferta }}</p>
+        
+        {% if n.taller_que_ofrece %}
+        <div class="p-2 bg-light rounded my-2">
+          <small class="text-primary"><i class="bi bi-mortarboard-fill"></i> <strong>Taller o apoyo voluntario:</strong> {{ n.taller_que_ofrece }}</small>
+        </div>
+        {% endif %}
+
+        <div class="mt-3">
+          <a href="https://wa.me/52{{ n.telefono_contacto | replace(' ', '') }}" target="_blank" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-whatsapp"></i> Contactar por WhatsApp
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

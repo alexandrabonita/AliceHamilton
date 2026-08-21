@@ -1,0 +1,15 @@
+# Entorno virtual
+venv/
+env/
+.venv/
+
+# Base de datos local y archivos generados
+kinder.db
+*.xlsx
+*.pdf
+
+# Archivos de Python y caché
+__pycache__/
+*.py[cod]
+*$py.class
+.vscode/

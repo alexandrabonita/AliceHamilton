@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom flex-wrap gap-2">
+  <div>
+    <h2 class="fw-bold text-primary mb-0">🏫 Comunidad Alice Hamilton Kínder 3</h2>
+    <p class="text-muted mb-0">Panel General de Información y Convivencia Escolar</p>
+  </div>
+  <div>
+    <a href="https://docs.google.com/spreadsheets/d/1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk/edit?usp=sharing" target="_blank" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-file-earmark-spreadsheet"></i> Google Sheet
+    </a>
+    <a href="/sincronizar" class="btn btn-primary btn-sm fw-bold">
+      <i class="bi bi-arrow-repeat"></i> Sincronizar Datos
+    </a>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+<!-- ================= 1. CONSULTA Y BÚSQUEDA BAJO DEMANDA ================= -->
+<div class="card shadow-sm border-0 rounded-4 mb-4 bg-white">
+  <div class="card-header bg-primary text-white rounded-top-4 py-3">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-search"></i> Centro de Búsqueda y Consultas</h5>
+    <small class="text-white-50">Ingresa un nombre o selecciona un filtro para desplegar la información correspondiente</small>
+  </div>
+  <div class="card-body p-4">
+    <div class="row g-3">
+      <!-- Búsqueda texto -->
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-bold text-muted">Buscar Alumno o Papá/Mamá:</label>
+        <input type="text" id="buscadorTexto" class="form-control" placeholder="Escribe para buscar..." onkeyup="ejecutarFiltro()">
+      </div>
+
+      <!-- Filtro Extraescolares -->
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-bold text-muted">Por Actividad Extraescolar:</label>
+        <select id="filtroExtra" class="form-select" onchange="ejecutarFiltro()">
+          <option value="">-- Seleccionar actividad --</option>
+          {% for act in extraescolares %}
+          <option value="{{ act.lower() }}">{{ act }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Filtro Alergias / Médico -->
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-bold text-muted">Por Alertas de Salud:</label>
+        <select id="filtroSalud" class="form-select" onchange="ejecutarFiltro()">
+          <option value="">-- Seleccionar estado --</option>
+          <option value="con_alergia">⚠️ Alumnos con alergias registradas</option>
+          <option value="sin_alergia">✅ Alumnos sin alergias</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ESTADO INICIAL (OCULTO HASTA QUE SE BUSQUE) -->
+    <div id="estadoInicial" class="text-center py-4 text-muted">
+      <i class="bi bi-search display-6 text-secondary opacity-50"></i>
+      <p class="mt-2 mb-0 small">Usa los filtros de arriba para ver las fichas de los alumnos.</p>
+    </div>
+
+    <!-- RESULTADOS (OCULTOS POR DEFECTO) -->
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3 mt-2 d-none" id="contenedorResultados">
+      {% for a in alumnos %}
+      {% set tiene_alergia = 'reportada' not in a.alergias.lower() and 'ningun' not in a.alergias.lower() and a.alergias.strip() != '' %}
+      <div class="col item-alumno" 
+           data-texto="{{ a.nombre.lower() }} {{ a.tutor_nombre.lower() }} {{ a.tutor_telefono }}"
+           data-extra="{{ a.extraescolar.lower() }}"
+           data-salud="{% if tiene_alergia %}con_alergia{% else %}sin_alergia{% endif %}">
+        
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h6 class="card-title fw-bold text-primary mb-0">{{ a.nombre }}</h6>
+              <span class="badge bg-secondary small">{{ a.extraescolar }}</span>
+            </div>
+            <p class="text-muted small mb-2">
+              <strong>Tutor:</strong> {{ a.tutor_nombre }} | <strong>Tel:</strong> {{ a.tutor_telefono }}
+            </p>
+            <div class="p-2 bg-light rounded small mb-2">
+              <div><strong>🎂 Cumpleaños:</strong> {{ a.cumpleanos }}</div>
+              <div><strong>🎨 Gustos:</strong> {{ a.personaje_favorito }} ({{ a.color_favorito }})</div>
+            </div>
+
+            {% if tiene_alergia %}
+            <div class="alert alert-danger p-2 mb-0 small">
+              <strong>⚠️ Alergia:</strong> {{ a.alergias }}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div id="sinResultados" class="text-center py-4 text-muted d-none">
+      <i class="bi bi-slash-circle display-6 text-danger opacity-50"></i>
+      <p class="mt-2 mb-0 small">No se encontraron registros con ese criterio.</p>
+    </div>
+
+    <div class="text-end mt-3">
+      <button class="btn btn-sm btn-link text-muted text-decoration-none" onclick="limpiarFiltros()">
+        <i class="bi bi-x-circle"></i> Limpiar búsqueda
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 2. SECCIONES GENERALES (VENTAS, EVENTOS, CURSOS) ================= -->
+<div class="row g-4">
+  
+  <!-- TABLÓN DE VENTAS -->
+  <div class="col-12 col-lg-6">
+    <div class="card h-100 shadow-sm border-0 rounded-4">
+      <div class="card-header bg-success text-white d-flex justify-content-between align-items-center py-3 rounded-top-4">
+        <h5 class="mb-0 fw-bold"><i class="bi bi-shop"></i> Tablón de Ventas</h5>
+        <a href="/ventas" class="btn btn-sm btn-light text-success fw-bold">Ver todo</a>
+      </div>
+      <div class="card-body">
+        {% for v in ventas[:3] %}
+        <div class="p-3 border-bottom">
+          <div class="d-flex justify-content-between">
+            <h6 class="fw-bold text-success mb-1">{{ v.titulo_producto }}</h6>
+            <span class="badge bg-light text-dark border">{{ v.giro }}</span>
+          </div>
+          <p class="text-muted small mb-2">{{ v.descripcion_oferta }}</p>
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">Por: {{ v.padre_nombre }}</small>
+            <a href="https://wa.me/52{{ v.telefono_contacto | replace(' ', '') }}" target="_blank" class="btn btn-sm btn-outline-success">
+              <i class="bi bi-whatsapp"></i> Contactar
+            </a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- PRÓXIMOS EVENTOS -->
+  <div class="col-12 col-lg-6">
+    <div class="card h-100 shadow-sm border-0 rounded-4">
+      <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center py-3 rounded-top-4">
+        <h5 class="mb-0 fw-bold"><i class="bi bi-calendar-event"></i> Próximos Eventos</h5>
+        <a href="/calendario" class="btn btn-sm btn-dark fw-bold">Ver Calendario</a>
+      </div>
+      <div class="card-body">
+        {% for ev in eventos %}
+        <div class="p-3 border-bottom">
+          <span class="badge bg-secondary mb-1">{{ ev.tipo }}</span>
+          <h6 class="fw-bold text-primary mb-1">{{ ev.titulo }}</h6>
+          <p class="text-muted small mb-1"><i class="bi bi-clock"></i> {{ ev.fecha }} | <i class="bi bi-geo-alt"></i> {{ ev.lugar }}</p>
+          <p class="small text-secondary mb-0">{{ ev.descripcion }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ESCUELA PARA PADRES Y TALLERES -->
+  <div class="col-12">
+    <div class="card shadow-sm border-0 rounded-4">
+      <div class="card-header bg-info text-white py-3 rounded-top-4">
+        <h5 class="mb-0 fw-bold"><i class="bi bi-mortarboard-fill"></i> Escuela para Padres & Cursos</h5>
+      </div>
+      <div class="card-body">
+        <div class="row row-cols-1 row-cols-md-2 g-3">
+          {% for c in cursos %}
+          <div class="col">
+            <div class="p-3 bg-light rounded-4 h-100">
+              <span class="badge bg-info text-white mb-2">{{ c.tipo }}</span>
+              <h6 class="fw-bold text-dark">{{ c.titulo }}</h6>
+              <p class="text-muted small mb-2"><strong>Imparte:</strong> {{ c.instructor }}</p>
+              <p class="small text-secondary mb-2">{{ c.descripcion }}</p>
+              {% if c.enlace_recurso %}
+              <a href="{{ c.enlace_recurso }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver Material</a>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- SCRIPT DE BÚSQUEDA BAJO DEMANDA -->
+<script>
+function ejecutarFiltro() {
+  const texto = document.getElementById('buscadorTexto').value.toLowerCase().trim();
+  const extra = document.getElementById('filtroExtra').value.toLowerCase().trim();
+  const salud = document.getElementById('filtroSalud').value.trim();
+
+  const contenedor = document.getElementById('contenedorResultados');
+  const inicial = document.getElementById('estadoInicial');
+  const sinRes = document.getElementById('sinResultados');
+  const items = document.getElementsByClassName('item-alumno');
+
+  // Si no hay ningún criterio, mantener oculto
+  if (texto === '' && extra === '' && salud === '') {
+    contenedor.classList.add('d-none');
+    inicial.classList.remove('d-none');
+    sinRes.classList.add('d-none');
+    return;
+  }
+
+  inicial.classList.add('d-none');
+  contenedor.classList.remove('d-none');
+
+  let coincidencias = 0;
+  for (let card of items) {
+    const cardTexto = card.getAttribute('data-texto') || '';
+    const cardExtra = card.getAttribute('data-extra') || '';
+    const cardSalud = card.getAttribute('data-salud') || '';
+
+    const coincideTexto = texto === '' || cardTexto.includes(texto);
+    const coincideExtra = extra === '' || cardExtra.includes(extra);
+    const coincideSalud = salud === '' || cardSalud === salud;
+
+    if (coincideTexto && coincideExtra && coincideSalud) {
+      card.style.display = '';
+      coincidencias++;
+    } else {
+      card.style.display = 'none';
+    }
+  }
+
+  if (coincidencias === 0) {
+    sinRes.classList.remove('d-none');
+  } else {
+    sinRes.classList.add('d-none');
+  }
+}
+
+function limpiarFiltros() {
+  document.getElementById('buscadorTexto').value = '';
+  document.getElementById('filtroExtra').value = '';
+  document.getElementById('filtroSalud').value = '';
+  ejecutarFiltro();
+}
+</script>
+{% endblock %}

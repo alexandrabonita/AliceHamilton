@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="text-warning mb-0"><i class="bi bi-calendar-event"></i> Calendario de Cumpleaños y Festejos</h3>
+  <a href="https://docs.google.com/spreadsheets/d/1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk/edit?usp=sharing" target="_blank" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Ver Google Sheet
+  </a>
+</div>
+
+<div class="row row-cols-1 row-cols-md-3 g-3">
+  {% for a in alumnos %}
+  <div class="col">
+    <div class="card h-100 shadow-sm border-0">
+      <div class="card-header bg-warning bg-opacity-25 fw-bold text-dark">
+        🎂 {{ a.cumpleanos }}
+      </div>
+      <div class="card-body">
+        <h5 class="card-title text-primary">{{ a.nombre }}</h5>
+        <p class="card-text mb-1"><strong>Contacto:</strong> {{ a.tutor_nombre }}</p>
+        <p class="card-text mb-2"><strong>Tel:</strong> <a href="tel:{{ a.tutor_telefono }}" class="text-decoration-none">{{ a.tutor_telefono }}</a></p>
+        <span class="badge {% if 'Sí' in a.festeja_escuela or 'si' in a.festeja_escuela.lower() %}bg-success{% else %}bg-secondary{% endif %}">
+          {{ a.festeja_escuela }}
+        </span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

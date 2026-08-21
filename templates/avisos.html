@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h3 class="text-danger fw-bold mb-0"><i class="bi bi-megaphone-fill"></i> Tablero de Avisos Oficiales</h3>
+    <small class="text-muted">Comunicados y avisos importantes del grupo Kínder 3</small>
+  </div>
+  
+  {% if user and user.rol in ['admin', 'docente', 'vocal'] %}
+  <button class="btn btn-danger rounded-pill px-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalAviso">
+    <i class="bi bi-plus-circle"></i> Publicar Aviso
+  </button>
+  {% endif %}
+</div>
+
+{% if avisos %}
+<div class="row g-3">
+  {% for av in avisos %}
+  <div class="col-12">
+    <div class="card shadow-sm border-0 rounded-4 border-start border-danger border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="card-title fw-bold text-danger mb-0">{{ av.titulo }}</h5>
+          <span class="badge bg-light text-muted border">{{ av.fecha or 'Reciente' }}</span>
+        </div>
+        <p class="card-text text-secondary mb-2">{{ av.contenido }}</p>
+        <small class="text-muted"><i class="bi bi-person-circle"></i> Publicado por: <strong>{{ av.autor or 'Dirección / Mesa Directiva' }}</strong></small>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card shadow-sm border-0 rounded-4 mb-3">
+  <div class="card-body p-5 text-center">
+    <div class="display-6 text-danger mb-2">📢</div>
+    <h5 class="fw-bold text-dark">No hay avisos publicados aún</h5>
+    <p class="text-muted small mb-0">Los comunicados del personal docente y mesa directiva aparecerán aquí.</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- Modal para Crear Aviso -->
+{% if user and user.rol in ['admin', 'docente', 'vocal'] %}
+<div class="modal fade" id="modalAviso" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content rounded-4 border-0">
+      <form action="/publicar-aviso" method="post">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title fw-bold"><i class="bi bi-megaphone"></i> Nuevo Aviso Escolar</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Título del Comunicado</label>
+            <input type="text" name="titulo" class="form-control" placeholder="Ej. Junta informativa de cierre de mes" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Contenido del Aviso</label>
+            <textarea name="contenido" class="form-control" rows="4" placeholder="Escribe el mensaje completo para los padres de familia..." required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-danger w-100 fw-bold">Publicar Aviso</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

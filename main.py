@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, Form, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -8,14 +9,58 @@ from datetime import datetime
 import os
 
 import models
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 import auth
 import cargar_datos
 
-# Crear tablas en SQLite
-models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Comunidad Alice Hamilton Kinder 3")
+def inicializar_datos_servidor():
+    """Crea los usuarios y sincroniza datos si la BD arranca vacía en Render."""
+    models.Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    
+    # 1. Crear usuarios por defecto si no existen
+    usuarios_iniciales = [
+        {"username": "admin", "nombre_completo": "Administrador / Soporte TI", "password": "admin123Kinder*", "rol": "admin"},
+        {"username": "maestra", "nombre_completo": "Maestra Titular Kínder 3", "password": "docente123Kinder*", "rol": "docente"},
+        {"username": "vocal", "nombre_completo": "Vocal de Grupo", "password": "vocal123Kinder*", "rol": "vocal"},
+        {"username": "padre", "nombre_completo": "Papá / Mamá de Familia", "password": "padre123Kinder*", "rol": "padre"}
+    ]
+    
+    for u in usuarios_iniciales:
+        existe = db.query(models.Usuario).filter(models.Usuario.username == u["username"]).first()
+        if not existe:
+            nuevo = models.Usuario(
+                username=u["username"],
+                nombre_completo=u["nombre_completo"],
+                password_hash=auth.get_password_hash(u["password"]),
+                rol=u["rol"],
+                activo=True
+            )
+            db.add(nuevo)
+    
+    db.commit()
+    
+    # 2. Si no hay alumnos, sincronizar desde Google Sheets
+    total_alumnos = db.query(models.Alumno).count()
+    db.close()
+    
+    if total_alumnos == 0:
+        print("Base de datos vacía detectada. Sincronizando con Google Sheets...")
+        try:
+            cargar_datos.sincronizar_base_de_datos()
+        except Exception as e:
+            print(f"Error en sincronización inicial: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Esto se ejecuta automáticamente al iniciar la aplicación en Render o Local
+    inicializar_datos_servidor()
+    yield
+
+
+app = FastAPI(title="Comunidad Alice Hamilton Kinder 3", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key="kinder-secret-key-super-segura-2026")
 
 if os.path.exists("static"):
@@ -111,12 +156,7 @@ def ver_avisos(request: Request, db: Session = Depends(get_db)):
 # --- FORMULARIOS ---
 
 @app.post("/publicar-aviso")
-def publicar_aviso(
-    request: Request,
-    titulo: str = Form(...),
-    contenido: str = Form(...),
-    db: Session = Depends(get_db)
-):
+def publicar_aviso(request: Request, titulo: str = Form(...), contenido: str = Form(...), db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user or user.rol not in ["admin", "docente", "vocal"]:
         return RedirectResponse(url="/login")

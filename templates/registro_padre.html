@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center mt-2">
+  <div class="col-12 col-md-9 col-lg-7">
+
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+      
+      <div class="d-flex align-items-center gap-3 mb-4 pb-2 border-bottom">
+        <div class="bg-success-subtle text-success rounded-circle d-flex align-items-center justify-content-center p-3" style="width: 50px; height: 50px;">
+          <i class="bi bi-person-check-fill fs-4"></i>
+        </div>
+        <div>
+          <h4 class="fw-bold mb-0">Registro de Padres de Familia</h4>
+          <small class="text-muted">Crea tu cuenta de acceso validando el registro de tu hijo(a)</small>
+        </div>
+      </div>
+
+      {% if error %}
+      <div class="alert alert-danger py-2 px-3 rounded-3 small mb-3">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> {{ error }}
+      </div>
+      {% endif %}
+
+      <!-- PASO 1: BÚSQUEDA DEL ALUMNO -->
+      {% if not alumno %}
+      <form action="/registro-padre/verificar" method="post">
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Escribe el nombre completo o apellidos de tu hijo(a)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+            <input type="text" name="nombre_hijo" class="form-control" placeholder="Ej. Eyra Paulette o Arellano De Luna" required autofocus>
+          </div>
+          <small class="text-muted mt-1 d-block">El sistema buscará si el alumno ya está matriculado en Kínder 3.</small>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-4">
+          <a href="/login" class="btn btn-light btn-sm fw-bold">Volver al Login</a>
+          <button type="submit" class="btn btn-primary fw-bold px-4">Verificar Alumno <i class="bi bi-arrow-right"></i></button>
+        </div>
+      </form>
+      {% endif %}
+
+      <!-- PASO 2: FORMULARIO DE REGISTRO Y COMPLETADO DE FICHA -->
+      {% if alumno %}
+      <div class="alert alert-success-subtle border border-success-subtle rounded-3 p-3 mb-4 d-flex align-items-center gap-2">
+        <i class="bi bi-check-circle-fill text-success fs-5"></i>
+        <div>
+          <small class="d-block text-muted">Alumno verificado en el sistema:</small>
+          <strong class="text-success fs-6">{{ alumno.nombre }}</strong>
+        </div>
+      </div>
+
+      <form action="/registro-padre/completar" method="post">
+        <input type="hidden" name="alumno_id" value="{{ alumno.id }}">
+
+        <h6 class="fw-bold text-primary mb-3"><i class="bi bi-person-badge"></i> 1. Tus Datos de Acceso y Contacto</h6>
+        
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Tu Nombre Completo (Mamá/Papá)</label>
+            <input type="text" name="tutor_nombre" class="form-control" value="{{ alumno.tutor_nombre or '' }}" required>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Teléfono Celular / WhatsApp</label>
+            <input type="text" name="tutor_telefono" class="form-control" value="{{ alumno.tutor_telefono or '' }}" placeholder="10 dígitos" required>
+          </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Correo Electrónico</label>
+            <input type="email" name="email" class="form-control" placeholder="tu_correo@ejemplo.com" required>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Nombre de Usuario para Login</label>
+            <input type="text" name="username" class="form-control" placeholder="ej. maria_perez" required>
+          </div>
+        </div>
+
+        <div class="row g-2 mb-4">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Crea una Contraseña</label>
+            <input type="password" name="password" class="form-control" placeholder="Mínimo 6 caracteres" required>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Confirmar Contraseña</label>
+            <input type="password" name="password_confirm" class="form-control" placeholder="Repite la contraseña" required>
+          </div>
+        </div>
+
+        <h6 class="fw-bold text-primary mb-3 border-top pt-3"><i class="bi bi-card-checklist"></i> 2. Completa o Actualiza la Ficha de tu Hijo(a)</h6>
+
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Alergias o Restricciones</label>
+            <input type="text" name="alergias" class="form-control" value="{% if alumno.alergias and alumno.alergias != 'Ninguna reportada' %}{{ alumno.alergias }}{% endif %}" placeholder="Ej. Alérgico a nueces, penicilina...">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Cuidados Médicos Especiales</label>
+            <input type="text" name="cuidados_medicos" class="form-control" value="{% if alumno.cuidados_medicos and alumno.cuidados_medicos != 'Ninguno' %}{{ alumno.cuidados_medicos }}{% endif %}" placeholder="Ej. Uso de inhalador, lentes...">
+          </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-bold">Color Favorito</label>
+            <input type="text" name="color_favorito" class="form-control" value="{{ alumno.color_favorito or '' }}" placeholder="Ej. Azul">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-bold">Personaje Favorito</label>
+            <input type="text" name="personaje_favorito" class="form-control" value="{{ alumno.personaje_favorito or '' }}" placeholder="Ej. Spiderman">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-bold">Talla de Uniforme</label>
+            <input type="text" name="talla" class="form-control" value="{{ alumno.talla or 'Talla 6' }}">
+          </div>
+        </div>
+
+        <div class="row g-2 mb-4">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">¿Festeja Cumpleaños en la Escuela?</label>
+            <select name="festeja_escuela" class="form-select">
+              <option value="Por confirmar" {% if alumno.festeja_escuela == 'Por confirmar' %}selected{% endif %}>Por confirmar</option>
+              <option value="Sí festeja en escuela" {% if alumno.festeja_escuela == 'Sí festeja en escuela' or 'sí' in alumno.festeja_escuela.lower() %}selected{% endif %}>Sí festeja en escuela</option>
+              <option value="No festeja en escuela" {% if alumno.festeja_escuela == 'No festeja en escuela' %}selected{% endif %}>No festeja en escuela</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-bold">Actividad Extraescolar</label>
+            <input type="text" name="extraescolar" class="form-control" value="{{ alumno.extraescolar or 'Ninguna' }}" placeholder="Ej. Fútbol, Karate, Ballet...">
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center border-top pt-3">
+          <a href="/registro-padre" class="btn btn-light btn-sm fw-bold">Cambiar Alumno</a>
+          <button type="submit" class="btn btn-success fw-bold px-4 shadow-sm">
+            <i class="bi bi-check2-circle"></i> Finalizar Registro y Entrar
+          </button>
+        </div>
+      </form>
+      {% endif %}
+
+    </div>
+
+  </div>
+</div>
+{% endblock %}

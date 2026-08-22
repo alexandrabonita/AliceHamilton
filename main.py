@@ -683,3 +683,116 @@ async def importar_base_datos(request: Request, archivo_json: UploadFile = File(
         print(f"Error al importar JSON: {e}")
 
     return RedirectResponse(url="/soporte", status_code=303)
+
+# --- AUTO-REGISTRO DE PADRES DE FAMILIA ---
+
+@app.get("/registro-padre", response_class=HTMLResponse)
+def vista_registro_padre(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if user:
+        return RedirectResponse(url="/")
+    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "error": None})
+
+@app.post("/registro-padre/verificar", response_class=HTMLResponse)
+def verificar_alumno_para_registro(request: Request, nombre_hijo: str = Form(...), db: Session = Depends(get_db)):
+    tokens_buscados = cargar_datos.simplificar_nombre(nombre_hijo)
+    if not tokens_buscados:
+        return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "error": "Por favor escribe un nombre válido."})
+
+    todos_alumnos = db.query(models.Alumno).all()
+    # Buscar coincidencia (al menos 2 palabras clave del nombre)
+    alumno_encontrado = next(
+        (a for a in todos_alumnos if len(tokens_buscados.intersection(cargar_datos.simplificar_nombre(a.nombre))) >= min(2, len(tokens_buscados))),
+        None
+    )
+
+    if not alumno_encontrado:
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={
+                "user": None,
+                "alumno": None,
+                "error": f"No se encontró ningún alumno con el nombre '{nombre_hijo}'. Verifica la ortografía o contacta a la mesa directiva."
+            }
+        )
+
+    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": alumno_encontrado, "error": None})
+
+@app.post("/registro-padre/completar", response_class=HTMLResponse)
+def completar_registro_padre(
+    request: Request,
+    alumno_id: int = Form(...),
+    tutor_nombre: str = Form(...),
+    tutor_telefono: str = Form(...),
+    email: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+    alergias: str = Form(""),
+    cuidados_medicos: str = Form(""),
+    color_favorito: str = Form(""),
+    personaje_favorito: str = Form(""),
+    talla: str = Form("Talla 6"),
+    festeja_escuela: str = Form("Por confirmar"),
+    extraescolar: str = Form("Ninguna"),
+    db: Session = Depends(get_db)
+):
+    alumno = db.query(models.Alumno).filter(models.Alumno.id == alumno_id).first()
+    if not alumno:
+        return RedirectResponse(url="/registro-padre")
+
+    # 1. Validaciones
+    if password != password_confirm:
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={"user": None, "alumno": alumno, "error": "Las contraseñas no coinciden."}
+        )
+
+    if len(password) < 6:
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={"user": None, "alumno": alumno, "error": "La contraseña debe tener al menos 6 caracteres."}
+        )
+
+    user_existente = db.query(models.Usuario).filter(models.Usuario.username == username.strip().lower()).first()
+    if user_existente:
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={"user": None, "alumno": alumno, "error": f"El nombre de usuario '{username}' ya está en uso. Elige otro."}
+        )
+
+    # 2. Crear Usuario
+    nuevo_usuario = models.Usuario(
+        username=username.strip().lower(),
+        nombre_completo=tutor_nombre.strip(),
+        email=email.strip(),
+        password_hash=auth.get_password_hash(password),
+        rol="padre",
+        activo=True,
+        requiere_cambio_pass=False
+    )
+    db.add(nuevo_usuario)
+
+    # 3. Actualizar Ficha del Alumno con los datos completados
+    alumno.tutor_nombre = tutor_nombre.strip()
+    alumno.tutor_telefono = tutor_telefono.strip()
+    alumno.alergias = alergias.strip() or "Ninguna reportada"
+    alumno.cuidados_medicos = cuidados_medicos.strip() or "Ninguno"
+    alumno.color_favorito = color_favorito.strip() or alumno.color_favorito
+    alumno.personaje_favorito = personaje_favorito.strip() or alumno.personaje_favorito
+    alumno.talla = talla.strip() or "Talla 6"
+    alumno.festeja_escuela = festeja_escuela.strip()
+    alumno.extraescolar = extraescolar.strip() or "Ninguna"
+
+    db.commit()
+    db.refresh(nuevo_usuario)
+
+    # 4. Iniciar sesión automáticamente
+    request.session["user_id"] = nuevo_usuario.id
+    request.session["user_rol"] = nuevo_usuario.rol
+
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)

@@ -538,13 +538,74 @@ def reset_database(request: Request, db: Session = Depends(get_db)):
     cargar_datos.sincronizar_base_de_datos()
     return RedirectResponse(url="/soporte", status_code=303)
 
-@app.get("/sincronizar")
-def sincronizar_desde_sheets(request: Request, db: Session = Depends(get_db)):
+# --- SINCRONIZACIÓN Y RESOLUCIÓN DE DISCREPANCIAS ---
+
+@app.get("/sincronizar", response_class=HTMLResponse)
+def sincronizar_vista_discrepancias(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user or user.rol not in ["admin", "docente"]:
         return RedirectResponse(url="/login")
+
+    discrepancias = cargar_datos.detectar_discrepancias()
+    
+    if not discrepancias:
+        cargar_datos.sincronizar_base_de_datos()
+        return templates.TemplateResponse(
+            request=request,
+            name="sincronizar.html",
+            context={"user": user, "discrepancias": [], "mensaje": "Todo está al día. La base de datos y Google Sheets coinciden al 100%."}
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="sincronizar.html",
+        context={"user": user, "discrepancias": discrepancias, "mensaje": None}
+    )
+
+@app.post("/sincronizar/resolver")
+async def resolver_sincronizacion(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol not in ["admin", "docente"]:
+        return RedirectResponse(url="/login")
+
+    form_data = await request.form()
+    for key, decision in form_data.items():
+        if key.startswith("decision_"):
+            partes = key.split("_")
+            tipo = partes[1]
+            item_id = int(partes[2])
+            campo = partes[3]
+            valor_sheet = form_data.get(f"val_sheet_{tipo}_{item_id}_{campo}", "")
+
+            if tipo == "alumno":
+                alumno = db.query(models.Alumno).filter(models.Alumno.id == item_id).first()
+                if alumno:
+                    if decision == "sheet":
+                        setattr(alumno, campo, valor_sheet)
+                    elif decision == "bd":
+                        valor_actual_bd = getattr(alumno, campo)
+                        cargar_datos.enviar_cambio_a_sheet({
+                            "accion": "actualizar_alumno",
+                            "nombre": alumno.nombre,
+                            campo: valor_actual_bd
+                        })
+
+            elif tipo == "evento":
+                evento = db.query(models.Evento).filter(models.Evento.id == item_id).first()
+                if evento:
+                    if decision == "sheet":
+                        setattr(evento, campo, valor_sheet)
+                    elif decision == "bd":
+                        valor_actual_bd = getattr(evento, campo)
+                        cargar_datos.enviar_cambio_a_sheet({
+                            "accion": "actualizar_evento",
+                            "titulo": evento.titulo,
+                            campo: valor_actual_bd
+                        })
+
+    db.commit()
     cargar_datos.sincronizar_base_de_datos()
-    return RedirectResponse(url="/soporte" if user.rol == "admin" else "/", status_code=303)
+    return RedirectResponse(url="/soporte", status_code=303)
 
 # --- EXPORTACIÓN INDIVIDUAL POR TABLA (CONSERVA HASH DE CONTRASEÑA) ---
 

@@ -7,6 +7,7 @@ from database import SessionLocal
 import models
 
 SPREADSHEET_ID = "1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk"
+APPS_SCRIPT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxNHwjdFpXjvk9xRjdqfgHQPLRXBDcQRE1YQ8OvL9Ffv_nDPai2YOKc5PS5b94K1_EHLQ/exec"
 
 MESES_MAP = {
     "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
@@ -45,175 +46,154 @@ def obtener_filas_pestana(nombre_pestana: str):
         print(f"Error al descargar '{nombre_pestana}': {e}")
     return []
 
-def fusionar_textos(texto_orig: str, texto_nuevo: str) -> str:
-    orig = (texto_orig or "").strip()
-    nuevo = (texto_nuevo or "").strip()
-    if not nuevo or nuevo.lower() in orig.lower():
-        return orig
-    if not orig:
-        return nuevo
-    return f"{orig} | {nuevo}"
+def extraer_datos_alumno_fila(row):
+    """Extrae de forma segura los valores de las columnas del Google Sheet."""
+    nombre = normalizar_texto(row[1]) if len(row) > 1 else ""
+    cumple = normalizar_texto(row[2]) if len(row) > 2 else ""
+    edad = int(row[3].strip()) if len(row) > 3 and row[3].strip().isdigit() else 5
+    tutor_nombre = normalizar_texto(row[4]) if len(row) > 4 else ""
+    tutor_tel = normalizar_texto(row[5]) if len(row) > 5 else ""
+    alergias = normalizar_texto(row[7]) if len(row) > 7 and row[7].strip() else "Ninguna reportada"
+    cuidados = normalizar_texto(row[11]) if len(row) > 11 and row[11].strip() else "Ninguno"
+    color = normalizar_texto(row[12]) if len(row) > 12 else ""
+    personaje = normalizar_texto(row[13]) if len(row) > 13 else ""
+    festeja = normalizar_texto(row[16]) if len(row) > 16 and row[16].strip() else "Por confirmar"
+    talla = normalizar_texto(row[19]) if len(row) > 19 and row[19].strip() else "Talla 6"
+    
+    # Extraescolar se ubica comúnmente en la columna 20 o 21 (Columna U)
+    extra = ""
+    if len(row) > 20 and row[20].strip():
+        extra = normalizar_texto(row[20])
+    elif len(row) > 19 and row[19].strip() and not row[19].strip().lower().startswith("talla"):
+        extra = normalizar_texto(row[19])
+    else:
+        extra = "Ninguna"
 
-def sincronizar_base_de_datos():
+    return {
+        "nombre": nombre, "cumpleanos": cumple, "edad": edad,
+        "tutor_nombre": tutor_nombre, "tutor_telefono": tutor_tel,
+        "alergias": alergias, "cuidados_medicos": cuidados,
+        "color_favorito": color, "personaje_favorito": personaje,
+        "festeja_escuela": festeja, "talla": talla, "extraescolar": extra
+    }
+
+def detectar_discrepancias():
+    """Compara SQLite vs Google Sheets campo por campo sin filtros excluyentes."""
     db = SessionLocal()
-    print("Iniciando sincronización limpia con Google Sheets...")
+    discrepancias = []
 
-    # 1. DIRECTORIO DE ALUMNOS
+    # 1. Comparar Alumnos
     filas_directorio = obtener_filas_pestana("Directorio y Ficha Alumnos")
+    todos_alumnos = db.query(models.Alumno).all()
+
     for row in filas_directorio:
         if len(row) < 2 or not row[1].strip() or "Nombre Completo" in row[1] or "DATOS BÁSICOS" in row[0]:
             continue
 
-        nombre = normalizar_texto(row[1])
-        cumpleanos = normalizar_texto(row[2]) if len(row) > 2 else ""
-        edad = int(row[3].strip()) if len(row) > 3 and row[3].strip().isdigit() else 5
-        tutor_nombre = normalizar_texto(row[4]) if len(row) > 4 else ""
-        tutor_telefono = normalizar_texto(row[5]) if len(row) > 5 else ""
-        alergias = normalizar_texto(row[7]) if len(row) > 7 and row[7].strip() else "Ninguna reportada"
-        cuidados = normalizar_texto(row[11]) if len(row) > 11 and row[11].strip() else "Ninguno"
-        color = normalizar_texto(row[12]) if len(row) > 12 else ""
-        personaje = normalizar_texto(row[13]) if len(row) > 13 else ""
-        festeja = normalizar_texto(row[16]) if len(row) > 16 and row[16].strip() else "Por confirmar"
-        talla = normalizar_texto(row[19]) if len(row) > 19 and row[19].strip() else "Talla 6"
-        extra = normalizar_texto(row[20]) if len(row) > 20 and row[20].strip() else "Ninguna"
+        sheet_data = extraer_datos_alumno_fila(row)
+        tokens_sheet = simplificar_nombre(sheet_data["nombre"])
+        alumno_bd = next((a for a in todos_alumnos if simplificar_nombre(a.nombre) == tokens_sheet), None)
 
-        tokens_nuevo = simplificar_nombre(nombre)
-        todos_alumnos = db.query(models.Alumno).all()
-        alumno = next((a for a in todos_alumnos if simplificar_nombre(a.nombre) == tokens_nuevo), None)
+        if alumno_bd:
+            campos_a_comparar = [
+                ("extraescolar", "Actividad Extraescolar"),
+                ("tutor_telefono", "Teléfono de Contacto"),
+                ("tutor_nombre", "Nombre del Tutor"),
+                ("cuidados_medicos", "Cuidados Médicos"),
+                ("alergias", "Alergias"),
+                ("talla", "Talla de Uniforme")
+            ]
 
-        if alumno:
-            alumno.cumpleanos = cumpleanos or alumno.cumpleanos
-            alumno.tutor_nombre = tutor_nombre or alumno.tutor_nombre
-            alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
-            alumno.alergias = fusionar_textos(alumno.alergias, alergias)
-            alumno.cuidados_medicos = fusionar_textos(alumno.cuidados_medicos, cuidados)
-            alumno.color_favorito = color or alumno.color_favorito
-            alumno.personaje_favorito = personaje or alumno.personaje_favorito
-            alumno.festeja_escuela = festeja or alumno.festeja_escuela
-            alumno.talla = talla or alumno.talla
-            alumno.extraescolar = extra or alumno.extraescolar
-        else:
-            db.add(models.Alumno(
-                nombre=nombre, cumpleanos=cumpleanos, edad=edad,
-                tutor_nombre=tutor_nombre, tutor_telefono=tutor_telefono,
-                alergias=alergias, cuidados_medicos=cuidados,
-                color_favorito=color, personaje_favorito=personaje,
-                festeja_escuela=festeja, talla=talla, extraescolar=extra
-            ))
-            db.commit()
+            for campo, etiqueta in campos_a_comparar:
+                val_bd = (getattr(alumno_bd, campo) or "").strip()
+                val_sheet = (sheet_data[campo] or "").strip()
 
-    # 2. CALENDARIO CUMPLEAÑOS
-    filas_cumple = obtener_filas_pestana("Calendario Cumpleaños")
-    todos_alumnos = db.query(models.Alumno).all()
+                if val_bd.lower() != val_sheet.lower():
+                    discrepancias.append({
+                        "tipo": "alumno",
+                        "id": alumno_bd.id,
+                        "identificador": alumno_bd.nombre,
+                        "campo": campo,
+                        "etiqueta": etiqueta,
+                        "valor_bd": val_bd if val_bd else "(Vacío)",
+                        "valor_sheet": val_sheet if val_sheet else "(Vacío)"
+                    })
 
-    for row in filas_cumple:
-        if len(row) < 3:
-            continue
-        mes = normalizar_texto(row[0])
-        dia = normalizar_texto(row[1])
-        nombre = normalizar_texto(row[2])
-
-        if not nombre or "Nombre del Alumno" in nombre or "CRONOGRAMA" in mes:
-            continue
-
-        cumple_formateado = f"{dia} de {mes.lower()}" if (dia and mes) else ""
-        tutor_nombre = normalizar_texto(row[3]) if len(row) > 3 else ""
-        tutor_telefono = normalizar_texto(row[4]) if len(row) > 4 else ""
-        festeja = normalizar_texto(row[5]) if len(row) > 5 else "Por confirmar"
-        notas_cumple = normalizar_texto(row[6]) if len(row) > 6 else ""
-
-        tokens_sheet = simplificar_nombre(nombre)
-        alumno = next((a for a in todos_alumnos if len(tokens_sheet.intersection(simplificar_nombre(a.nombre))) >= 2), None)
-        
-        if alumno:
-            if cumple_formateado:
-                alumno.cumpleanos = cumple_formateado
-            alumno.tutor_nombre = tutor_nombre or alumno.tutor_nombre
-            alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
-            alumno.festeja_escuela = festeja or alumno.festeja_escuela
-            alumno.cuidados_medicos = fusionar_textos(alumno.cuidados_medicos, notas_cumple)
-
-    # 3. CALENDARIO EVENTOS
+    # 2. Comparar Eventos
     filas_eventos = obtener_filas_pestana("Calendario Eventos")
     for row in filas_eventos:
-        if len(row) < 4:
+        if len(row) < 4 or "Título Evento" in row[3] or "CRONOGRAMA" in row[0]:
             continue
-        mes = normalizar_texto(row[0])
-        dia = normalizar_texto(row[1])
-        anio = normalizar_texto(row[2]) if len(row) > 2 else "2026"
-        titulo = normalizar_texto(row[3]) if len(row) > 3 else ""
+        titulo = normalizar_texto(row[3])
+        if not titulo:
+            continue
+        resp_sheet = normalizar_texto(row[5]) if len(row) > 5 else ""
+        lugar_sheet = normalizar_texto(row[6]) if len(row) > 6 else ""
 
-        if not titulo or "Título Evento" in titulo or "CRONOGRAMA" in mes:
+        evento_bd = db.query(models.Evento).filter(models.Evento.titulo == titulo).first()
+        if evento_bd:
+            if resp_sheet and evento_bd.responsable.strip().lower() != resp_sheet.lower():
+                discrepancias.append({
+                    "tipo": "evento",
+                    "id": evento_bd.id,
+                    "identificador": evento_bd.titulo,
+                    "campo": "responsable",
+                    "etiqueta": "Responsable del Evento",
+                    "valor_bd": evento_bd.responsable or "(Vacío)",
+                    "valor_sheet": resp_sheet or "(Vacío)"
+                })
+            if lugar_sheet and evento_bd.lugar.strip().lower() != lugar_sheet.lower():
+                discrepancias.append({
+                    "tipo": "evento",
+                    "id": evento_bd.id,
+                    "identificador": evento_bd.titulo,
+                    "campo": "lugar",
+                    "etiqueta": "Lugar del Evento",
+                    "valor_bd": evento_bd.lugar or "(Vacío)",
+                    "valor_sheet": lugar_sheet or "(Vacío)"
+                })
+
+    db.close()
+    return discrepancias
+
+def enviar_cambio_a_sheet(payload):
+    """Envía la actualización a Google Sheets vía Apps Script Webhook."""
+    if not APPS_SCRIPT_WEBHOOK_URL:
+        return
+    try:
+        res = requests.post(APPS_SCRIPT_WEBHOOK_URL, json=payload, timeout=10)
+        print(f"Respuesta del Webhook Google Apps Script: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"Error enviando cambio a Google Sheet: {e}")
+
+def sincronizar_base_de_datos():
+    """Actualización e inserción directa desde Google Sheets a SQLite."""
+    db = SessionLocal()
+    filas_directorio = obtener_filas_pestana("Directorio y Ficha Alumnos")
+    todos_alumnos = db.query(models.Alumno).all()
+
+    for row in filas_directorio:
+        if len(row) < 2 or not row[1].strip() or "Nombre Completo" in row[1] or "DATOS BÁSICOS" in row[0]:
             continue
 
-        fecha_iso = armar_fecha_iso(mes, dia, anio)
-        tipo = normalizar_texto(row[4]) if len(row) > 4 else "Evento General"
-        responsable = normalizar_texto(row[5]) if len(row) > 5 else "Dirección / Comité"
-        lugar = normalizar_texto(row[6]) if len(row) > 6 else "Colegio"
-        descripcion = normalizar_texto(row[7]) if len(row) > 7 else ""
-        notas = normalizar_texto(row[8]) if len(row) > 8 else ""
+        d = extraer_datos_alumno_fila(row)
+        tokens_sheet = simplificar_nombre(d["nombre"])
+        alumno = next((a for a in todos_alumnos if simplificar_nombre(a.nombre) == tokens_sheet), None)
 
-        evento_existente = db.query(models.Evento).filter(
-            models.Evento.titulo == titulo,
-            models.Evento.fecha == fecha_iso
-        ).first()
-
-        if evento_existente:
-            evento_existente.tipo = tipo or evento_existente.tipo
-            evento_existente.responsable = responsable or evento_existente.responsable
-            evento_existente.lugar = lugar or evento_existente.lugar
-            evento_existente.descripcion = fusionar_textos(evento_existente.descripcion, descripcion)
-            evento_existente.notas = fusionar_textos(evento_existente.notas, notas)
+        if alumno:
+            alumno.cumpleanos = d["cumpleanos"] or alumno.cumpleanos
+            alumno.edad = d["edad"]
+            alumno.tutor_nombre = d["tutor_nombre"] or alumno.tutor_nombre
+            alumno.tutor_telefono = d["tutor_telefono"] or alumno.tutor_telefono
+            alumno.alergias = d["alergias"] or alumno.alergias
+            alumno.cuidados_medicos = d["cuidados_medicos"] or alumno.cuidados_medicos
+            alumno.color_favorito = d["color_favorito"] or alumno.color_favorito
+            alumno.personaje_favorito = d["personaje_favorito"] or alumno.personaje_favorito
+            alumno.festeja_escuela = d["festeja_escuela"] or alumno.festeja_escuela
+            alumno.talla = d["talla"] or alumno.talla
+            alumno.extraescolar = d["extraescolar"] or alumno.extraescolar
         else:
-            db.add(models.Evento(
-                titulo=titulo,
-                fecha=fecha_iso,
-                tipo=tipo,
-                responsable=responsable,
-                lugar=lugar,
-                descripcion=descripcion,
-                notas=notas
-            ))
-
-    # 4. COMUNIDAD Y RED DE PADRES
-    filas_red = obtener_filas_pestana("Comunidad y Red de Padres")
-    for row in filas_red:
-        if len(row) < 3 or "Nombre" in row[0] or "RED DE" in row[0]:
-            continue
-        padre_nombre = normalizar_texto(row[0])
-        negocio_titulo = normalizar_texto(row[1])
-        giro = normalizar_texto(row[2]) if len(row) > 2 else "Comercio General"
-        descripcion = normalizar_texto(row[3]) if len(row) > 3 else ""
-        taller = normalizar_texto(row[4]) if len(row) > 4 else ""
-        telefono = normalizar_texto(row[5]) if len(row) > 5 else ""
-
-        if not negocio_titulo and not padre_nombre:
-            continue
-
-        emp = db.query(models.Emprendimiento).filter(
-            models.Emprendimiento.padre_nombre == padre_nombre,
-            models.Emprendimiento.titulo_producto == negocio_titulo
-        ).first()
-
-        if emp:
-            emp.giro = giro or emp.giro
-            emp.descripcion_oferta = fusionar_textos(emp.descripcion_oferta, descripcion)
-            emp.taller_que_ofrece = fusionar_textos(emp.taller_que_ofrece, taller)
-            emp.telefono_contacto = telefono or emp.telefono_contacto
-        else:
-            db.add(models.Emprendimiento(
-                padre_nombre=padre_nombre,
-                titulo_producto=negocio_titulo or "Emprendimiento Familiar",
-                giro=giro,
-                descripcion_oferta=descripcion,
-                taller_que_ofrece=taller,
-                telefono_contacto=telefono,
-                fecha_publicacion="2026"
-            ))
+            db.add(models.Alumno(**d))
 
     db.commit()
     db.close()
-    print("Sincronización sin duplicados terminada.")
-
-if __name__ == "__main__":
-    sincronizar_base_de_datos()

@@ -1,6 +1,7 @@
 import csv
 import io
 import urllib.parse
+import unicodedata
 import requests
 from database import SessionLocal
 import models
@@ -16,8 +17,13 @@ MESES_MAP = {
 def normalizar_texto(texto: str) -> str:
     return " ".join(texto.strip().split()) if texto else ""
 
+def simplificar_nombre(nombre: str) -> set:
+    if not nombre:
+        return set()
+    nombre_limpio = unicodedata.normalize('NFKD', nombre).encode('ASCII', 'ignore').decode('utf-8').lower()
+    return set(nombre_limpio.split())
+
 def armar_fecha_iso(mes_str: str, dia_str: str, anio_str: str = "2026") -> str:
-    """Convierte mes (nombre/número), día y año a formato YYYY-MM-DD."""
     if not mes_str or not dia_str:
         return ""
     m_clean = mes_str.lower().strip()
@@ -27,7 +33,6 @@ def armar_fecha_iso(mes_str: str, dia_str: str, anio_str: str = "2026") -> str:
     return f"{anio_num}-{mes_num}-{dia_num}"
 
 def obtener_filas_pestana(nombre_pestana: str):
-    """Descarga los datos CSV de una pestaña específica de Google Sheets."""
     sheet_encoded = urllib.parse.quote(nombre_pestana)
     url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -37,11 +42,10 @@ def obtener_filas_pestana(nombre_pestana: str):
         if res.status_code == 200:
             return list(csv.reader(io.StringIO(res.text)))
     except Exception as e:
-        print(f"Error al descargar la pestaña '{nombre_pestana}': {e}")
+        print(f"Error al descargar '{nombre_pestana}': {e}")
     return []
 
 def fusionar_textos(texto_orig: str, texto_nuevo: str) -> str:
-    """Concatena notas o detalles sin duplicar cadenas idénticas."""
     orig = (texto_orig or "").strip()
     nuevo = (texto_nuevo or "").strip()
     if not nuevo or nuevo.lower() in orig.lower():
@@ -52,11 +56,9 @@ def fusionar_textos(texto_orig: str, texto_nuevo: str) -> str:
 
 def sincronizar_base_de_datos():
     db = SessionLocal()
-    print("Iniciando sincronización completa con Google Sheets...")
+    print("Iniciando sincronización limpia con Google Sheets...")
 
-    # =========================================================================
-    # 1. PESTAÑA: Directorio y Ficha Alumnos
-    # =========================================================================
+    # 1. DIRECTORIO DE ALUMNOS
     filas_directorio = obtener_filas_pestana("Directorio y Ficha Alumnos")
     for row in filas_directorio:
         if len(row) < 2 or not row[1].strip() or "Nombre Completo" in row[1] or "DATOS BÁSICOS" in row[0]:
@@ -75,10 +77,12 @@ def sincronizar_base_de_datos():
         talla = normalizar_texto(row[19]) if len(row) > 19 and row[19].strip() else "Talla 6"
         extra = normalizar_texto(row[20]) if len(row) > 20 and row[20].strip() else "Ninguna"
 
-        alumno = db.query(models.Alumno).filter(models.Alumno.nombre == nombre).first()
+        tokens_nuevo = simplificar_nombre(nombre)
+        todos_alumnos = db.query(models.Alumno).all()
+        alumno = next((a for a in todos_alumnos if simplificar_nombre(a.nombre) == tokens_nuevo), None)
+
         if alumno:
             alumno.cumpleanos = cumpleanos or alumno.cumpleanos
-            alumno.edad = edad
             alumno.tutor_nombre = tutor_nombre or alumno.tutor_nombre
             alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
             alumno.alergias = fusionar_textos(alumno.alergias, alergias)
@@ -96,11 +100,12 @@ def sincronizar_base_de_datos():
                 color_favorito=color, personaje_favorito=personaje,
                 festeja_escuela=festeja, talla=talla, extraescolar=extra
             ))
+            db.commit()
 
-    # =========================================================================
-    # 2. PESTAÑA: Calendario Cumpleaños
-    # =========================================================================
+    # 2. CALENDARIO CUMPLEAÑOS
     filas_cumple = obtener_filas_pestana("Calendario Cumpleaños")
+    todos_alumnos = db.query(models.Alumno).all()
+
     for row in filas_cumple:
         if len(row) < 3:
             continue
@@ -111,14 +116,15 @@ def sincronizar_base_de_datos():
         if not nombre or "Nombre del Alumno" in nombre or "CRONOGRAMA" in mes:
             continue
 
+        cumple_formateado = f"{dia} de {mes.lower()}" if (dia and mes) else ""
         tutor_nombre = normalizar_texto(row[3]) if len(row) > 3 else ""
         tutor_telefono = normalizar_texto(row[4]) if len(row) > 4 else ""
         festeja = normalizar_texto(row[5]) if len(row) > 5 else "Por confirmar"
         notas_cumple = normalizar_texto(row[6]) if len(row) > 6 else ""
 
-        cumple_formateado = f"{dia} de {mes.lower()}" if (dia and mes) else ""
-
-        alumno = db.query(models.Alumno).filter(models.Alumno.nombre == nombre).first()
+        tokens_sheet = simplificar_nombre(nombre)
+        alumno = next((a for a in todos_alumnos if len(tokens_sheet.intersection(simplificar_nombre(a.nombre))) >= 2), None)
+        
         if alumno:
             if cumple_formateado:
                 alumno.cumpleanos = cumple_formateado
@@ -126,22 +132,8 @@ def sincronizar_base_de_datos():
             alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
             alumno.festeja_escuela = festeja or alumno.festeja_escuela
             alumno.cuidados_medicos = fusionar_textos(alumno.cuidados_medicos, notas_cumple)
-        else:
-            db.add(models.Alumno(
-                nombre=nombre,
-                cumpleanos=cumple_formateado,
-                tutor_nombre=tutor_nombre,
-                tutor_telefono=tutor_telefono,
-                festeja_escuela=festeja,
-                cuidados_medicos=notas_cumple or "Ninguno",
-                alergias="Ninguna reportada",
-                extraescolar="Ninguna",
-                talla="Talla 6"
-            ))
 
-    # =========================================================================
-    # 3. PESTAÑA: Calendario Eventos (Mes, Día, Año, Título, Tipo, Responsable, Lugar, Descripción, Notas)
-    # =========================================================================
+    # 3. CALENDARIO EVENTOS
     filas_eventos = obtener_filas_pestana("Calendario Eventos")
     for row in filas_eventos:
         if len(row) < 4:
@@ -183,9 +175,7 @@ def sincronizar_base_de_datos():
                 notas=notas
             ))
 
-    # =========================================================================
-    # 4. PESTAÑA: Comunidad y Red de Padres (Emprendimientos / Cursos)
-    # =========================================================================
+    # 4. COMUNIDAD Y RED DE PADRES
     filas_red = obtener_filas_pestana("Comunidad y Red de Padres")
     for row in filas_red:
         if len(row) < 3 or "Nombre" in row[0] or "RED DE" in row[0]:
@@ -223,7 +213,7 @@ def sincronizar_base_de_datos():
 
     db.commit()
     db.close()
-    print("¡Sincronización de todas las pestañas completada con éxito!")
+    print("Sincronización sin duplicados terminada.")
 
 if __name__ == "__main__":
     sincronizar_base_de_datos()

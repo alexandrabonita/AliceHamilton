@@ -1,44 +1,529 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+<div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom flex-wrap gap-2">
   <div>
-    <h3 class="text-info text-dark fw-bold mb-0"><i class="bi bi-gear-fill text-info"></i> Panel de Soporte y Control TI</h3>
-    <small class="text-muted">Gestión de usuarios del sistema y sincronización con Google Sheets</small>
+    <h3 class="text-dark fw-bold mb-0"><i class="bi bi-terminal-fill text-info"></i> Panel de Administración y Soporte TI</h3>
+    <small class="text-muted">Control total de base de datos, exportación individual por tabla y restablecimiento de accesos</small>
   </div>
-  <a href="/sincronizar" class="btn btn-primary fw-bold shadow-sm">
-    <i class="bi bi-arrow-repeat"></i> Sincronizar Google Sheets Ahora
-  </a>
+  
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/sincronizar" class="btn btn-outline-primary btn-sm fw-bold"><i class="bi bi-arrow-repeat"></i> Sincronizar Sheets</a>
+    <button class="btn btn-outline-dark btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#modalExportar"><i class="bi bi-download"></i> Exportar (JSON)</button>
+    <button class="btn btn-outline-secondary btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#modalImportar"><i class="bi bi-upload"></i> Importar JSON</button>
+    <a href="/admin/reset-db" class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="return confirm('¿Seguro que deseas purgar la BD y reconstruir todo en limpio desde Google Sheets?');">
+      <i class="bi bi-trash3-fill"></i> Purgar y Reconstruir BD
+    </a>
+  </div>
 </div>
 
-<div class="card shadow-sm border-0 rounded-4 p-3 bg-white">
-  <h5 class="fw-bold mb-3">Usuarios Registrados en el Sistema</h5>
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
-        <tr>
-          <th>ID</th>
-          <th>Usuario</th>
-          <th>Nombre Completo</th>
-          <th>Rol</th>
-          <th>Estado</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for u in usuarios %}
-        <tr>
-          <td>{{ u.id }}</td>
-          <td class="fw-bold">{{ u.username }}</td>
-          <td>{{ u.nombre_completo }}</td>
-          <td>
-            <span class="badge {% if u.rol=='admin' %}bg-danger{% elif u.rol=='docente' %}bg-primary{% elif u.rol=='vocal' %}bg-warning text-dark{% else %}bg-success{% endif %}">
-              {{ u.rol | upper }}
-            </span>
-          </td>
-          <td><span class="badge bg-success">Activo</span></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<!-- NAVEGADOR DE PESTAÑAS -->
+<ul class="nav nav-tabs mb-3" id="soporteTabs" role="tablist">
+  <li class="nav-item"><button class="nav-link active fw-bold text-primary" data-bs-toggle="tab" data-bs-target="#tab-alumnos"><i class="bi bi-people-fill"></i> Alumnos ({{ alumnos|length }})</button></li>
+  <li class="nav-item"><button class="nav-link fw-bold text-success" data-bs-toggle="tab" data-bs-target="#tab-eventos"><i class="bi bi-calendar-event"></i> Eventos ({{ eventos|length }})</button></li>
+  <li class="nav-item"><button class="nav-link fw-bold text-warning text-dark" data-bs-toggle="tab" data-bs-target="#tab-emprendimientos"><i class="bi bi-shop"></i> Emprendimientos ({{ emprendimientos|length }})</button></li>
+  <li class="nav-item"><button class="nav-link fw-bold text-danger" data-bs-toggle="tab" data-bs-target="#tab-usuarios"><i class="bi bi-person-lock"></i> Usuarios ({{ usuarios|length }})</button></li>
+  <li class="nav-item"><button class="nav-link fw-bold text-secondary" data-bs-toggle="tab" data-bs-target="#tab-avisos"><i class="bi bi-megaphone"></i> Avisos ({{ avisos|length }})</button></li>
+</ul>
+
+<div class="tab-content bg-white p-3 rounded-4 shadow-sm" id="soporteTabsContent">
+
+  <!-- ================= TABLA ALUMNOS ================= -->
+  <div class="tab-pane fade show active" id="tab-alumnos">
+    <form action="/admin/eliminar-masivo" method="post" id="form-alumnos">
+      <input type="hidden" name="tabla" value="alumnos">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">Tabla: <code>alumnos</code></h5>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-outline-danger btn-sm fw-bold" onclick="return confirm('¿Eliminar todos los alumnos seleccionados?');"><i class="bi bi-trash3"></i> Eliminar Seleccionados</button>
+          <button type="button" class="btn btn-primary btn-sm rounded-pill" onclick="nuevoAlumno()"><i class="bi bi-plus-circle"></i> Nuevo Alumno</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this, 'form-alumnos')"></th>
+              <th>ID</th>
+              <th>Nombre del Alumno</th>
+              <th>Cumpleaños</th>
+              <th>Tutor</th>
+              <th>Teléfono</th>
+              <th>Extraescolar</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in alumnos %}
+            <tr>
+              <td><input type="checkbox" name="ids[]" value="{{ a.id }}"></td>
+              <td>{{ a.id }}</td>
+              <td class="fw-bold">{{ a.nombre }}</td>
+              <td>{{ a.cumpleanos }}</td>
+              <td>{{ a.tutor_nombre }}</td>
+              <td>{{ a.tutor_telefono }}</td>
+              <td><span class="badge bg-secondary">{{ a.extraescolar }}</span></td>
+              <td class="text-end">
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" onclick="editarAlumno('{{ a.id }}', '{{ a.nombre }}', '{{ a.cumpleanos }}', '{{ a.edad }}', '{{ a.tutor_nombre }}', '{{ a.tutor_telefono }}', '{{ a.extraescolar }}', '{{ a.talla }}', '{{ a.alergias }}', '{{ a.cuidados_medicos }}')"><i class="bi bi-pencil"></i></button>
+                <a href="/admin/eliminar/alumnos/{{ a.id }}" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="return confirm('¿Eliminar {{ a.nombre }}?');"><i class="bi bi-trash"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <!-- ================= TABLA EVENTOS ================= -->
+  <div class="tab-pane fade" id="tab-eventos">
+    <form action="/admin/eliminar-masivo" method="post" id="form-eventos">
+      <input type="hidden" name="tabla" value="eventos">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">Tabla: <code>eventos</code></h5>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-outline-danger btn-sm fw-bold" onclick="return confirm('¿Eliminar los eventos seleccionados?');"><i class="bi bi-trash3"></i> Eliminar Seleccionados</button>
+          <button type="button" class="btn btn-success btn-sm rounded-pill" onclick="nuevoEvento()"><i class="bi bi-plus-circle"></i> Nuevo Evento</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this, 'form-eventos')"></th>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Título</th>
+              <th>Tipo</th>
+              <th>Responsable</th>
+              <th>Lugar</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in eventos %}
+            <tr>
+              <td><input type="checkbox" name="ids[]" value="{{ ev.id }}"></td>
+              <td>{{ ev.id }}</td>
+              <td><code>{{ ev.fecha }}</code></td>
+              <td class="fw-bold">{{ ev.titulo }}</td>
+              <td><span class="badge bg-secondary">{{ ev.tipo }}</span></td>
+              <td>{{ ev.responsable }}</td>
+              <td>{{ ev.lugar }}</td>
+              <td class="text-end">
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" onclick="editarEvento('{{ ev.id }}', '{{ ev.titulo }}', '{{ ev.fecha }}', '{{ ev.tipo }}', '{{ ev.responsable }}', '{{ ev.lugar }}', '{{ ev.descripcion }}', '{{ ev.notas }}')"><i class="bi bi-pencil"></i></button>
+                <a href="/admin/eliminar/eventos/{{ ev.id }}" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="return confirm('¿Eliminar evento?');"><i class="bi bi-trash"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <!-- ================= TABLA EMPRENDIMIENTOS ================= -->
+  <div class="tab-pane fade" id="tab-emprendimientos">
+    <form action="/admin/eliminar-masivo" method="post" id="form-ventas">
+      <input type="hidden" name="tabla" value="emprendimientos">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">Tabla: <code>emprendimientos</code></h5>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-outline-danger btn-sm fw-bold" onclick="return confirm('¿Eliminar ventas seleccionadas?');"><i class="bi bi-trash3"></i> Eliminar Seleccionados</button>
+          <button type="button" class="btn btn-warning text-dark btn-sm rounded-pill" onclick="nuevaVenta()"><i class="bi bi-plus-circle"></i> Nueva Venta</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this, 'form-ventas')"></th>
+              <th>ID</th>
+              <th>Producto / Servicio</th>
+              <th>Giro</th>
+              <th>Padre / Madre</th>
+              <th>Teléfono</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for emp in emprendimientos %}
+            <tr>
+              <td><input type="checkbox" name="ids[]" value="{{ emp.id }}"></td>
+              <td>{{ emp.id }}</td>
+              <td class="fw-bold">{{ emp.titulo_producto }}</td>
+              <td><span class="badge bg-light text-dark border">{{ emp.giro }}</span></td>
+              <td>{{ emp.padre_nombre }}</td>
+              <td>{{ emp.telefono_contacto }}</td>
+              <td class="text-end">
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" onclick="editarVenta('{{ emp.id }}', '{{ emp.titulo_producto }}', '{{ emp.giro }}', '{{ emp.padre_nombre }}', '{{ emp.telefono_contacto }}', '{{ emp.descripcion_oferta }}')"><i class="bi bi-pencil"></i></button>
+                <a href="/admin/eliminar/emprendimientos/{{ emp.id }}" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="return confirm('¿Eliminar registro?');"><i class="bi bi-trash"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <!-- ================= TABLA USUARIOS ================= -->
+  <div class="tab-pane fade" id="tab-usuarios">
+    <form action="/admin/eliminar-masivo" method="post" id="form-usuarios">
+      <input type="hidden" name="tabla" value="usuarios">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">Tabla: <code>usuarios</code></h5>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-outline-danger btn-sm fw-bold" onclick="return confirm('¿Eliminar los usuarios seleccionados?');"><i class="bi bi-trash3"></i> Eliminar Seleccionados</button>
+          <button type="button" class="btn btn-danger btn-sm rounded-pill" onclick="nuevoUsuario()"><i class="bi bi-person-plus"></i> Nuevo Usuario</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this, 'form-usuarios')"></th>
+              <th>ID</th>
+              <th>Username</th>
+              <th>Nombre Completo</th>
+              <th>Correo Electrónico</th>
+              <th>Rol</th>
+              <th>Estado / Clave</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in usuarios %}
+            <tr>
+              <td>{% if u.username != 'admin' %}<input type="checkbox" name="ids[]" value="{{ u.id }}">{% endif %}</td>
+              <td>{{ u.id }}</td>
+              <td class="fw-bold">{{ u.username }}</td>
+              <td>{{ u.nombre_completo }}</td>
+              <td><small class="text-muted">{{ u.email or 'Sin registrar' }}</small></td>
+              <td><span class="badge {% if u.rol=='admin' %}bg-danger{% elif u.rol=='docente' %}bg-primary{% elif u.rol=='vocal' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ u.rol | upper }}</span></td>
+              <td>
+                {% if u.requiere_cambio_pass %}
+                <span class="badge bg-warning text-dark"><i class="bi bi-key"></i> Clave Temporal</span>
+                {% else %}
+                <span class="badge bg-success">Activo</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <a href="/admin/reset-password/{{ u.id }}" class="btn btn-outline-warning text-dark btn-sm py-0 px-2" title="Restablecer clave al Username" onclick="return confirm('¿Restablecer contraseña de {{ u.username }}? Su nueva clave temporal será su nombre de usuario.');"><i class="bi bi-key-fill"></i> Reset</a>
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" onclick="editarUsuario('{{ u.id }}', '{{ u.username }}', '{{ u.nombre_completo }}', '{{ u.email }}', '{{ u.rol }}')"><i class="bi bi-pencil"></i></button>
+                {% if u.username != 'admin' %}
+                <a href="/admin/eliminar/usuarios/{{ u.id }}" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="return confirm('¿Eliminar usuario?');"><i class="bi bi-trash"></i></a>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <!-- ================= TABLA AVISOS ================= -->
+  <div class="tab-pane fade" id="tab-avisos">
+    <form action="/admin/eliminar-masivo" method="post" id="form-avisos">
+      <input type="hidden" name="tabla" value="avisos">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">Tabla: <code>avisos</code></h5>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-outline-danger btn-sm fw-bold" onclick="return confirm('¿Eliminar avisos seleccionados?');"><i class="bi bi-trash3"></i> Eliminar Seleccionados</button>
+          <button type="button" class="btn btn-secondary btn-sm rounded-pill" onclick="nuevoAviso()"><i class="bi bi-plus-circle"></i> Nuevo Aviso</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this, 'form-avisos')"></th>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Título</th>
+              <th>Autor</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for av in avisos %}
+            <tr>
+              <td><input type="checkbox" name="ids[]" value="{{ av.id }}"></td>
+              <td>{{ av.id }}</td>
+              <td>{{ av.fecha }}</td>
+              <td class="fw-bold">{{ av.titulo }}</td>
+              <td>{{ av.autor }}</td>
+              <td class="text-end">
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" onclick="editarAviso('{{ av.id }}', '{{ av.titulo }}', '{{ av.contenido }}', '{{ av.autor }}', '{{ av.fecha }}')"><i class="bi bi-pencil"></i></button>
+                <a href="/admin/eliminar/avisos/{{ av.id }}" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="return confirm('¿Eliminar aviso?');"><i class="bi bi-trash"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+</div>
+
+<!-- ================= MODAL EXPORTAR INDIVIDUAL ================= -->
+<div class="modal fade" id="modalExportar" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title fw-bold"><i class="bi bi-download"></i> Exportar Tablas (Archivos JSON)</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4">
+        <p class="small text-muted mb-3">Se descargará un archivo <code>.json</code> individual por cada tabla que selecciones (nombrado iniciando con la tabla):</p>
+        <div class="d-flex justify-content-between mb-2">
+          <label class="form-check-label fw-bold"><input type="checkbox" id="checkTodoExport" class="form-check-input me-2" checked onclick="toggleExportAll(this)"> Seleccionar Todas</label>
+        </div>
+        <hr class="my-2">
+        <div class="row g-2">
+          <div class="col-6"><label><input type="checkbox" value="alumnos" class="form-check-input me-2 export-item" checked> Alumnos</label></div>
+          <div class="col-6"><label><input type="checkbox" value="eventos" class="form-check-input me-2 export-item" checked> Eventos</label></div>
+          <div class="col-6"><label><input type="checkbox" value="emprendimientos" class="form-check-input me-2 export-item" checked> Emprendimientos</label></div>
+          <div class="col-6"><label><input type="checkbox" value="usuarios" class="form-check-input me-2 export-item" checked> Usuarios</label></div>
+          <div class="col-6"><label><input type="checkbox" value="avisos" class="form-check-input me-2 export-item" checked> Avisos</label></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-dark w-100 fw-bold" onclick="ejecutarDescargasMultiples()">Descargar JSON de Tablas Seleccionadas</button>
+      </div>
+    </div>
   </div>
 </div>
+
+<!-- ================= MODAL IMPORTAR ================= -->
+<div class="modal fade" id="modalImportar" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content rounded-4 border-0">
+      <form action="/admin/importar" method="post" enctype="multipart/form-data">
+        <div class="modal-header bg-secondary text-white">
+          <h5 class="modal-title fw-bold"><i class="bi bi-upload"></i> Importar Datos JSON</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <label class="form-label small fw-bold">Selecciona archivo de respaldo (.json)</label>
+          <input type="file" name="archivo_json" class="form-control" accept=".json" required>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-secondary w-100 fw-bold">Importar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL CRUD DINÁMICO ================= -->
+<div class="modal fade" id="modalCrudEditor" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content rounded-4 border-0">
+      <form action="/admin/guardar-registro" method="post">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title fw-bold" id="modalCrudTitulo">Registro</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4" id="modalCrudBody"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary fw-bold px-4">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- JAVASCRIPT -->
+<script>
+const TUTORES_MAP = {{ tutores_json | safe }};
+let modalCrud = null;
+
+function getModalInstance() {
+  if (!modalCrud) {
+    modalCrud = new bootstrap.Modal(document.getElementById('modalCrudEditor'));
+  }
+  return modalCrud;
+}
+
+function toggleAll(masterCheckbox, formId) {
+  const form = document.getElementById(formId);
+  const checkboxes = form.querySelectorAll('input[type="checkbox"][name="ids[]"]');
+  checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+}
+
+function toggleExportAll(master) {
+  document.querySelectorAll('.export-item').forEach(cb => cb.checked = master.checked);
+}
+
+function ejecutarDescargasMultiples() {
+  const checkboxes = document.querySelectorAll('.export-item:checked');
+  if (checkboxes.length === 0) {
+    alert('Por favor selecciona al menos una tabla para exportar.');
+    return;
+  }
+
+  const modalEl = document.getElementById('modalExportar');
+  const modalObj = bootstrap.Modal.getInstance(modalEl);
+  if (modalObj) modalObj.hide();
+
+  checkboxes.forEach((cb, index) => {
+    setTimeout(() => {
+      const tabla = cb.value;
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = `/admin/exportar-tabla/${tabla}`;
+      document.body.appendChild(iframe);
+      setTimeout(() => document.body.removeChild(iframe), 3000);
+    }, index * 400);
+  });
+}
+
+function nuevoAlumno() {
+  editarAlumno('', '', '', '5', '', '', 'Ninguna', 'Talla 6', 'Ninguna reportada', 'Ninguno');
+  document.getElementById('modalCrudTitulo').innerText = 'Nuevo Alumno';
+}
+
+function editarAlumno(id, nombre, cumple, edad, tutor, tel, extra, talla, alergias, cuidados) {
+  document.getElementById('modalCrudTitulo').innerText = id ? 'Editar Alumno' : 'Nuevo Alumno';
+  document.getElementById('modalCrudBody').innerHTML = `
+    <input type="hidden" name="tabla" value="alumnos">
+    <input type="hidden" name="id" value="${id || 0}">
+    <div class="mb-2"><label class="form-label small fw-bold">Nombre del Alumno</label><input type="text" name="nombre" class="form-control" value="${nombre}" required></div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Cumpleaños</label><input type="text" name="cumpleanos" class="form-control" value="${cumple}" placeholder="Ej. 15 de marzo"></div>
+      <div class="col-6"><label class="form-label small fw-bold">Edad</label><input type="number" name="edad" class="form-control" value="${edad}"></div>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Tutor (Papá/Mamá)</label><input type="text" name="tutor_nombre" class="form-control" value="${tutor}"></div>
+      <div class="col-6"><label class="form-label small fw-bold">Teléfono</label><input type="text" name="tutor_telefono" class="form-control" value="${tel}"></div>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Extraescolar</label><input type="text" name="extraescolar" class="form-control" value="${extra}"></div>
+      <div class="col-6"><label class="form-label small fw-bold">Talla</label><input type="text" name="talla" class="form-control" value="${talla}"></div>
+    </div>
+    <div class="mb-2"><label class="form-label small fw-bold">Alergias</label><input type="text" name="alergias" class="form-control" value="${alergias}"></div>
+    <div class="mb-2"><label class="form-label small fw-bold">Cuidados Médicos</label><textarea name="cuidados_medicos" class="form-control" rows="2">${cuidados}</textarea></div>
+  `;
+  getModalInstance().show();
+}
+
+function nuevoEvento() {
+  editarEvento('', '', '', 'Festival', '', '', '', '');
+  document.getElementById('modalCrudTitulo').innerText = 'Nuevo Evento';
+}
+
+function editarEvento(id, titulo, fecha, tipo, responsable, lugar, desc, notas) {
+  document.getElementById('modalCrudTitulo').innerText = id ? 'Editar Evento' : 'Nuevo Evento';
+  document.getElementById('modalCrudBody').innerHTML = `
+    <input type="hidden" name="tabla" value="eventos">
+    <input type="hidden" name="id" value="${id || 0}">
+    <div class="mb-2"><label class="form-label small fw-bold">Título</label><input type="text" name="titulo" class="form-control" value="${titulo}" required></div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Fecha</label><input type="date" name="fecha" class="form-control" value="${fecha}" required></div>
+      <div class="col-6"><label class="form-label small fw-bold">Tipo</label><input type="text" name="tipo" class="form-control" value="${tipo}"></div>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Responsable</label><input type="text" name="responsable" class="form-control" value="${responsable}"></div>
+      <div class="col-6"><label class="form-label small fw-bold">Lugar</label><input type="text" name="lugar" class="form-control" value="${lugar}"></div>
+    </div>
+    <div class="mb-2"><label class="form-label small fw-bold">Descripción</label><textarea name="descripcion" class="form-control" rows="2">${desc}</textarea></div>
+    <div class="mb-2"><label class="form-label small fw-bold">Notas</label><textarea name="notas" class="form-control" rows="2">${notas}</textarea></div>
+  `;
+  getModalInstance().show();
+}
+
+function nuevoUsuario() {
+  editarUsuario('', '', '', '', 'padre');
+  document.getElementById('modalCrudTitulo').innerText = 'Nuevo Usuario';
+}
+
+function editarUsuario(id, username, nombre, email, rol) {
+  document.getElementById('modalCrudTitulo').innerText = id ? 'Editar Usuario' : 'Nuevo Usuario';
+  document.getElementById('modalCrudBody').innerHTML = `
+    <input type="hidden" name="tabla" value="usuarios">
+    <input type="hidden" name="id" value="${id || 0}">
+    <div class="mb-2"><label class="form-label small fw-bold">Username</label><input type="text" name="username" class="form-control" value="${username}" required></div>
+    <div class="mb-2"><label class="form-label small fw-bold">Nombre Completo</label><input type="text" name="nombre_completo" class="form-control" value="${nombre}" required></div>
+    <div class="mb-2"><label class="form-label small fw-bold">Correo Electrónico</label><input type="email" name="email" class="form-control" value="${email || ''}" placeholder="correo@ejemplo.com"></div>
+    <div class="mb-2">
+      <label class="form-label small fw-bold">Rol</label>
+      <select name="rol" class="form-select">
+        <option value="padre" ${rol === 'padre' ? 'selected' : ''}>Padre de Familia</option>
+        <option value="vocal" ${rol === 'vocal' ? 'selected' : ''}>Vocal de Grupo</option>
+        <option value="docente" ${rol === 'docente' ? 'selected' : ''}>Docente / Directivo</option>
+        <option value="admin" ${rol === 'admin' ? 'selected' : ''}>Administrador (TI)</option>
+      </select>
+    </div>
+    <div class="mb-2"><label class="form-label small fw-bold">Contraseña ${id ? '(Dejar en blanco para no cambiar)' : '(Si se deja en blanco, será el Username con cambio obligatorio)'}</label><input type="password" name="password" class="form-control"></div>
+  `;
+  getModalInstance().show();
+}
+
+function nuevaVenta() {
+  editarVenta('', '', '', '', '', '');
+  document.getElementById('modalCrudTitulo').innerText = 'Nueva Venta / Emprendimiento';
+}
+
+function actualizarTelefonoPadre(selectElem) {
+  const padreSeleccionado = selectElem.value;
+  const telInput = document.getElementById('inputTelContacto');
+  if (padreSeleccionado && TUTORES_MAP[padreSeleccionado]) {
+    telInput.value = TUTORES_MAP[padreSeleccionado];
+  }
+}
+
+function editarVenta(id, titulo, giro, padre, tel, desc) {
+  document.getElementById('modalCrudTitulo').innerText = id ? 'Editar Negocio' : 'Nuevo Negocio';
+  let opcionesTutores = `<option value="">-- Seleccionar papá/mamá --</option>`;
+  for (let tutor in TUTORES_MAP) {
+    const selected = (tutor === padre) ? 'selected' : '';
+    opcionesTutores += `<option value="${tutor}" ${selected}>${tutor}</option>`;
+  }
+
+  document.getElementById('modalCrudBody').innerHTML = `
+    <input type="hidden" name="tabla" value="emprendimientos">
+    <input type="hidden" name="id" value="${id || 0}">
+    <div class="mb-2"><label class="form-label small fw-bold">Producto / Servicio</label><input type="text" name="titulo_producto" class="form-control" value="${titulo}" required></div>
+    <div class="row g-2 mb-2">
+      <div class="col-6">
+        <label class="form-label small fw-bold">Giro</label>
+        <input type="text" name="giro" class="form-control" value="${giro}" placeholder="Ej. Calzado, Alimentos..." required>
+      </div>
+      <div class="col-6">
+        <label class="form-label small fw-bold">Padre / Madre</label>
+        <select name="padre_nombre" class="form-select" onchange="actualizarTelefonoPadre(this)" required>
+          ${opcionesTutores}
+        </select>
+      </div>
+    </div>
+    <div class="mb-2"><label class="form-label small fw-bold">Teléfono WhatsApp</label><input type="text" name="telefono_contacto" id="inputTelContacto" class="form-control" value="${tel}"></div>
+    <div class="mb-2"><label class="form-label small fw-bold">Descripción de Oferta</label><textarea name="descripcion_oferta" class="form-control" rows="2">${desc}</textarea></div>
+  `;
+  getModalInstance().show();
+}
+
+function nuevoAviso() {
+  editarAviso('', '', '', 'Mesa Directiva', '');
+  document.getElementById('modalCrudTitulo').innerText = 'Nuevo Aviso Escolar';
+}
+
+function editarAviso(id, titulo, contenido, autor, fecha) {
+  document.getElementById('modalCrudTitulo').innerText = id ? 'Editar Aviso' : 'Nuevo Aviso Escolar';
+  document.getElementById('modalCrudBody').innerHTML = `
+    <input type="hidden" name="tabla" value="avisos">
+    <input type="hidden" name="id" value="${id || 0}">
+    <div class="mb-2"><label class="form-label small fw-bold">Título del Aviso</label><input type="text" name="titulo" class="form-control" value="${titulo}" required></div>
+    <div class="row g-2 mb-2">
+      <div class="col-6"><label class="form-label small fw-bold">Autor / Emisor</label><input type="text" name="autor" class="form-control" value="${autor}"></div>
+      <div class="col-6"><label class="form-label small fw-bold">Fecha</label><input type="text" name="fecha" class="form-control" value="${fecha || 'Reciente'}"></div>
+    </div>
+    <div class="mb-2"><label class="form-label small fw-bold">Contenido</label><textarea name="contenido" class="form-control" rows="3" required>${contenido || ''}</textarea></div>
+  `;
+  getModalInstance().show();
+}
+</script>
 {% endblock %}

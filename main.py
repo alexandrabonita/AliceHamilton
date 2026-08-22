@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request, Form, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Depends, Request, Form, UploadFile, File, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -15,7 +15,6 @@ from database import engine, get_db, SessionLocal
 import auth
 import cargar_datos
 
-# Mapeo de meses en español a números de dos dígitos
 MESES_MAP = {
     "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
     "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
@@ -23,7 +22,6 @@ MESES_MAP = {
 }
 
 def parsear_fecha_cumple(texto_cumple, anio_actual=2026):
-    """Convierte cadenas como '15 de marzo' o '4 de enero' a formato 'YYYY-MM-DD'."""
     if not texto_cumple:
         return None
     texto = texto_cumple.lower().strip()
@@ -36,38 +34,35 @@ def parsear_fecha_cumple(texto_cumple, anio_actual=2026):
     return None
 
 def inicializar_datos_servidor():
-    """Crea los usuarios y sincroniza datos si la BD arranca vacía en Render o local."""
     models.Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
-    # 1. Crear usuarios por defecto si no existen
     usuarios_iniciales = [
-        {"username": "admin", "nombre_completo": "Administrador / Soporte TI", "password": "admin123Kinder*", "rol": "admin"},
-        {"username": "maestra", "nombre_completo": "Maestra Titular Kínder 3", "password": "docente123Kinder*", "rol": "docente"},
-        {"username": "vocal", "nombre_completo": "Vocal de Grupo", "password": "vocal123Kinder*", "rol": "vocal"},
-        {"username": "padre", "nombre_completo": "Papá / Mamá de Familia", "password": "padre123Kinder*", "rol": "padre"}
+        {"username": "admin", "nombre_completo": "Administrador / Soporte TI", "email": "soporte@alicehamilton.edu", "password": "admin123Kinder*", "rol": "admin"},
+        {"username": "maestra", "nombre_completo": "Maestra Titular Kínder 3", "email": "docente@alicehamilton.edu", "password": "docente123Kinder*", "rol": "docente"},
+        {"username": "vocal", "nombre_completo": "Vocal de Grupo", "email": "vocal@alicehamilton.edu", "password": "vocal123Kinder*", "rol": "vocal"},
+        {"username": "padre", "nombre_completo": "Papá / Mamá de Familia", "email": "padres@alicehamilton.edu", "password": "padre123Kinder*", "rol": "padre"}
     ]
     
     for u in usuarios_iniciales:
-        existe = db.query(models.Usuario).filter(models.Usuario.username == u["username"]).first()
-        if not existe:
+        user_db = db.query(models.Usuario).filter(models.Usuario.username == u["username"]).first()
+        if not user_db:
             nuevo = models.Usuario(
                 username=u["username"],
                 nombre_completo=u["nombre_completo"],
+                email=u["email"],
                 password_hash=auth.get_password_hash(u["password"]),
                 rol=u["rol"],
-                activo=True
+                activo=True,
+                requiere_cambio_pass=False
             )
             db.add(nuevo)
     
     db.commit()
-    
-    # 2. Si no hay alumnos, sincronizar desde Google Sheets
     total_alumnos = db.query(models.Alumno).count()
     db.close()
     
     if total_alumnos == 0:
-        print("Base de datos vacía detectada. Sincronizando con Google Sheets...")
         try:
             cargar_datos.sincronizar_base_de_datos()
         except Exception as e:
@@ -86,7 +81,7 @@ if os.path.exists("static"):
 
 templates = Jinja2Templates(directory="templates")
 
-# --- AUTH ---
+# --- AUTH & SESIONES ---
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
@@ -103,6 +98,9 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     
     request.session["user_id"] = user.id
     request.session["user_rol"] = user.rol
+    
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.get("/logout")
@@ -110,13 +108,93 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
-# --- INICIO (DASHBOARD) ---
+# --- PERFIL DE USUARIO ---
+
+@app.get("/perfil", response_class=HTMLResponse)
+def ver_perfil(request: Request, forzar: int = 0, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse(
+        request=request,
+        name="perfil.html",
+        context={"user": user, "forzar": forzar or user.requiere_cambio_pass, "mensaje": None, "error": None}
+    )
+
+@app.post("/perfil/actualizar-datos")
+def actualizar_datos_perfil(
+    request: Request,
+    nombre_completo: str = Form(...),
+    email: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    user = auth.get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login")
+
+    user_db = db.query(models.Usuario).filter(models.Usuario.id == user.id).first()
+    user_db.nombre_completo = nombre_completo.strip()
+    user_db.email = email.strip()
+    db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="perfil.html",
+        context={"user": user_db, "forzar": user_db.requiere_cambio_pass, "mensaje": "Datos personales actualizados correctamente.", "error": None}
+    )
+
+@app.post("/perfil/cambiar-password")
+def cambiar_password(
+    request: Request,
+    pass_actual: str = Form(""),
+    pass_nuevo: str = Form(...),
+    pass_confirm: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    user = auth.get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login")
+
+    user_db = db.query(models.Usuario).filter(models.Usuario.id == user.id).first()
+
+    if not user_db.requiere_cambio_pass:
+        if not auth.verify_password(pass_actual, user_db.password_hash):
+            return templates.TemplateResponse(
+                request=request, name="perfil.html",
+                context={"user": user_db, "forzar": False, "mensaje": None, "error": "La contraseña actual es incorrecta."}
+            )
+
+    if pass_nuevo != pass_confirm:
+        return templates.TemplateResponse(
+            request=request, name="perfil.html",
+            context={"user": user_db, "forzar": user_db.requiere_cambio_pass, "mensaje": None, "error": "Las nuevas contraseñas no coinciden."}
+        )
+
+    if len(pass_nuevo) < 6:
+        return templates.TemplateResponse(
+            request=request, name="perfil.html",
+            context={"user": user_db, "forzar": user_db.requiere_cambio_pass, "mensaje": None, "error": "La contraseña debe tener al menos 6 caracteres."}
+        )
+
+    user_db.password_hash = auth.get_password_hash(pass_nuevo)
+    user_db.requiere_cambio_pass = False
+    db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="perfil.html",
+        context={"user": user_db, "forzar": False, "mensaje": "¡Contraseña actualizada con éxito! Ya puedes navegar libremente.", "error": None}
+    )
+
+# --- VISTAS GENERALES ---
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
 
     alumnos = db.query(models.Alumno).all()
     ventas = db.query(models.Emprendimiento).all()
@@ -137,13 +215,13 @@ def home(request: Request, db: Session = Depends(get_db)):
         }
     )
 
-# --- MENÚS PRINCIPALES ---
-
 @app.get("/alumnos", response_class=HTMLResponse)
 def ver_alumnos(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
     alumnos = db.query(models.Alumno).all()
     return templates.TemplateResponse(request=request, name="alumnos.html", context={"alumnos": alumnos, "user": user})
 
@@ -152,13 +230,13 @@ def ver_calendario(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
     
     alumnos = db.query(models.Alumno).all()
     eventos_db = db.query(models.Evento).all()
-    
     eventos_calendario = []
     
-    # 1. Cumpleaños de Alumnos (Responsable: Padre/Tutor de familia)
     for a in alumnos:
         fecha_iso = parsear_fecha_cumple(a.cumpleanos)
         if fecha_iso:
@@ -169,16 +247,15 @@ def ver_calendario(request: Request, db: Session = Depends(get_db)):
                 "textColor": "#ffffff",
                 "extendedProps": {
                     "tipo": "Cumpleaños",
-                    "responsable": a.tutor_nombre or "Padre / Tutor de Familia",
+                    "responsable": a.tutor_nombre or "Padre / Tutor",
                     "tutor": a.tutor_nombre or "No especificado",
                     "telefono": a.tutor_telefono or "Sin registrar",
                     "festeja": a.festeja_escuela or "Por confirmar",
-                    "gustos": f"{a.personaje_favorito} (Color: {a.color_favorito})" if (a.personaje_favorito or a.color_favorito) else "No especificado",
-                    "notas": "Festejo de cumpleaños del alumno"
+                    "gustos": f"{a.personaje_favorito} ({a.color_favorito})" if (a.personaje_favorito or a.color_favorito) else "No especificado",
+                    "notas": "Festejo escolar de cumpleaños"
                 }
             })
             
-    # 2. Eventos Escolares Registrados
     for ev in eventos_db:
         fecha_final = ev.fecha if "-" in ev.fecha else (parsear_fecha_cumple(ev.fecha) or "2026-09-01")
         eventos_calendario.append({
@@ -195,20 +272,15 @@ def ver_calendario(request: Request, db: Session = Depends(get_db)):
             }
         })
         
-    return templates.TemplateResponse(
-        request=request,
-        name="calendario.html",
-        context={
-            "user": user,
-            "eventos_json": json.dumps(eventos_calendario)
-        }
-    )
+    return templates.TemplateResponse(request=request, name="calendario.html", context={"user": user, "eventos_json": json.dumps(eventos_calendario)})
 
 @app.get("/ventas", response_class=HTMLResponse)
 def ver_ventas(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
     negocios = db.query(models.Emprendimiento).all()
     return templates.TemplateResponse(request=request, name="ventas.html", context={"negocios": negocios, "user": user})
 
@@ -217,10 +289,22 @@ def ver_avisos(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
     avisos = db.query(models.Aviso).all()
     return templates.TemplateResponse(request=request, name="avisos.html", context={"avisos": avisos, "user": user})
 
-# --- FORMULARIOS ---
+@app.get("/docentes", response_class=HTMLResponse)
+def ver_docentes(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol not in ["admin", "docente"]:
+        return RedirectResponse(url="/")
+    if user.requiere_cambio_pass:
+        return RedirectResponse(url="/perfil?forzar=1")
+    alumnos = db.query(models.Alumno).all()
+    return templates.TemplateResponse(request=request, name="docentes.html", context={"alumnos": alumnos, "user": user})
+
+# --- FORMULARIOS PÚBLICOS ---
 
 @app.post("/publicar-aviso")
 def publicar_aviso(request: Request, titulo: str = Form(...), contenido: str = Form(...), db: Session = Depends(get_db)):
@@ -228,32 +312,27 @@ def publicar_aviso(request: Request, titulo: str = Form(...), contenido: str = F
     if not user or user.rol not in ["admin", "docente", "vocal"]:
         return RedirectResponse(url="/login")
 
-    nuevo_aviso = models.Aviso(
+    nuevo = models.Aviso(
         titulo=titulo,
         contenido=contenido,
         fecha=datetime.now().strftime("%d/%m/%Y"),
         autor=f"{user.nombre_completo} ({user.rol.upper()})"
     )
-    db.add(nuevo_aviso)
+    db.add(nuevo)
     db.commit()
     return RedirectResponse(url="/avisos", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.post("/publicar-venta")
 def publicar_venta(
-    request: Request,
-    padre_nombre: str = Form(...),
-    titulo_producto: str = Form(...),
-    giro: str = Form(...),
-    descripcion_oferta: str = Form(...),
-    taller_que_ofrece: str = Form(""),
-    telefono_contacto: str = Form(...),
-    db: Session = Depends(get_db)
+    request: Request, padre_nombre: str = Form(...), titulo_producto: str = Form(...),
+    giro: str = Form(...), descripcion_oferta: str = Form(...), taller_que_ofrece: str = Form(""),
+    telefono_contacto: str = Form(...), db: Session = Depends(get_db)
 ):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
 
-    nueva_venta = models.Emprendimiento(
+    nuevo = models.Emprendimiento(
         padre_nombre=padre_nombre,
         titulo_producto=titulo_producto,
         giro=giro,
@@ -262,93 +341,284 @@ def publicar_venta(
         telefono_contacto=telefono_contacto,
         fecha_publicacion=datetime.now().strftime("%d/%m/%Y")
     )
-    db.add(nueva_venta)
+    db.add(nuevo)
     db.commit()
     return RedirectResponse(url="/ventas", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.post("/publicar-evento")
 def publicar_evento(
-    request: Request,
-    titulo: str = Form(...),
-    fecha: str = Form(...),
-    responsable: str = Form(""),
-    lugar: str = Form(""),
-    tipo: str = Form("Evento General"),
-    descripcion: str = Form(""),
-    notas: str = Form(""),
-    db: Session = Depends(get_db)
+    request: Request, titulo: str = Form(...), fecha: str = Form(...),
+    responsable: str = Form(""), lugar: str = Form(""), tipo: str = Form("Evento General"),
+    descripcion: str = Form(""), notas: str = Form(""), db: Session = Depends(get_db)
 ):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
 
-    nuevo_evento = models.Evento(
-        titulo=titulo,
-        fecha=fecha,
-        responsable=responsable,
-        lugar=lugar,
-        tipo=tipo,
-        descripcion=descripcion,
-        notas=notas
+    nuevo = models.Evento(
+        titulo=titulo, fecha=fecha, responsable=responsable,
+        lugar=lugar, tipo=tipo, descripcion=descripcion, notas=notas
     )
-    db.add(nuevo_evento)
+    db.add(nuevo)
     db.commit()
     return RedirectResponse(url="/calendario", status_code=status.HTTP_303_SEE_OTHER)
 
-@app.post("/publicar-curso")
-def publicar_curso(
-    request: Request,
-    titulo: str = Form(...),
-    instructor: str = Form(...),
-    tipo: str = Form(...),
-    descripcion: str = Form(...),
-    enlace_recurso: str = Form(""),
-    db: Session = Depends(get_db)
-):
-    user = auth.get_current_user(request, db)
-    if not user:
-        return RedirectResponse(url="/login")
+# =========================================================================
+# PANEL DE SOPORTE TI: CRUD, RESET, GESTIÓN MASIVA, EXPORT E IMPORT
+# =========================================================================
 
-    nuevo_curso = models.CursoTaller(
-        titulo=titulo,
-        instructor=instructor,
-        tipo=tipo,
-        descripcion=descripcion,
-        enlace_recurso=enlace_recurso
-    )
-    db.add(nuevo_curso)
-    db.commit()
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
-# --- VISTAS PROTEGIDAS POR ROL ---
-
-@app.get("/docentes", response_class=HTMLResponse)
-def ver_docentes(request: Request, db: Session = Depends(get_db)):
-    user = auth.get_current_user(request, db)
-    if not user or user.rol not in ["admin", "docente"]:
-        return RedirectResponse(url="/")
-    alumnos = db.query(models.Alumno).all()
-    return templates.TemplateResponse(request=request, name="docentes.html", context={"alumnos": alumnos, "user": user})
+MODEL_MAP = {
+    "alumnos": models.Alumno,
+    "usuarios": models.Usuario,
+    "eventos": models.Evento,
+    "emprendimientos": models.Emprendimiento,
+    "avisos": models.Aviso,
+    "cursos": models.CursoTaller
+}
 
 @app.get("/soporte", response_class=HTMLResponse)
 def ver_soporte(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user or user.rol != "admin":
         return RedirectResponse(url="/")
-    usuarios = db.query(models.Usuario).all()
-    return templates.TemplateResponse(request=request, name="soporte.html", context={"usuarios": usuarios, "user": user})
 
+    alumnos = db.query(models.Alumno).all()
+    tutores_dict = {}
+    for a in alumnos:
+        if a.tutor_nombre and a.tutor_nombre.strip():
+            tutores_dict[a.tutor_nombre.strip()] = a.tutor_telefono or ""
+
+    return templates.TemplateResponse(
+        request=request,
+        name="soporte.html",
+        context={
+            "user": user,
+            "usuarios": db.query(models.Usuario).all(),
+            "alumnos": alumnos,
+            "eventos": db.query(models.Evento).all(),
+            "emprendimientos": db.query(models.Emprendimiento).all(),
+            "avisos": db.query(models.Aviso).all(),
+            "cursos": db.query(models.CursoTaller).all(),
+            "tutores_json": json.dumps(tutores_dict)
+        }
+    )
+
+@app.get("/admin/reset-password/{user_id}")
+def admin_reset_password_usuario(user_id: int, request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    target = db.query(models.Usuario).filter(models.Usuario.id == user_id).first()
+    if target:
+        target.password_hash = auth.get_password_hash(target.username)
+        target.requiere_cambio_pass = True
+        db.commit()
+
+    return RedirectResponse(url="/soporte#tab-usuarios", status_code=303)
+
+@app.post("/admin/guardar-registro")
+async def admin_guardar_registro(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    form_data = await request.form()
+    tabla = form_data.get("tabla", "").strip().lower()
+    item_id = int(form_data.get("id", 0))
+
+    if tabla == "usuarios":
+        username = form_data.get("username", "").strip()
+        email = form_data.get("email", "").strip()
+        nombre_completo = form_data.get("nombre_completo", "").strip()
+        rol = form_data.get("rol", "padre").strip()
+        password = form_data.get("password", "").strip()
+
+        if item_id > 0:
+            usuario = db.query(models.Usuario).filter(models.Usuario.id == item_id).first()
+            if usuario:
+                usuario.username = username
+                usuario.email = email
+                usuario.nombre_completo = nombre_completo
+                usuario.rol = rol
+                if password:
+                    usuario.password_hash = auth.get_password_hash(password)
+                    usuario.requiere_cambio_pass = False
+        else:
+            pass_final = password if password else username
+            usuario = models.Usuario(
+                username=username,
+                email=email,
+                nombre_completo=nombre_completo,
+                password_hash=auth.get_password_hash(pass_final),
+                rol=rol,
+                activo=True,
+                requiere_cambio_pass=True if not password else False
+            )
+            db.add(usuario)
+        db.commit()
+        return RedirectResponse(url="/soporte#tab-usuarios", status_code=status.HTTP_303_SEE_OTHER)
+
+    model_class = MODEL_MAP.get(tabla)
+    if not model_class:
+        return RedirectResponse(url="/soporte")
+
+    if item_id > 0:
+        item = db.query(model_class).filter(model_class.id == item_id).first()
+    else:
+        item = model_class()
+        db.add(item)
+
+    if item:
+        for key, val in form_data.items():
+            if key in ["tabla", "id"]:
+                continue
+            val_str = str(val).strip()
+            if hasattr(item, key):
+                if key == "edad":
+                    setattr(item, key, int(val_str) if val_str.isdigit() else 5)
+                else:
+                    setattr(item, key, val_str)
+        db.commit()
+
+    return RedirectResponse(url=f"/soporte#tab-{tabla}", status_code=status.HTTP_303_SEE_OTHER)
+
+@app.post("/admin/eliminar-masivo")
+async def admin_eliminar_masivo(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    form_data = await request.form()
+    tabla = form_data.get("tabla", "").strip().lower()
+    ids_raw = form_data.getlist("ids[]")
+
+    model_class = MODEL_MAP.get(tabla)
+    if model_class and ids_raw:
+        for item_id in [int(i) for i in ids_raw if str(i).isdigit()]:
+            item = db.query(model_class).filter(model_class.id == item_id).first()
+            if item:
+                if tabla == "usuarios" and getattr(item, "username", "") == "admin":
+                    continue
+                db.delete(item)
+        db.commit()
+
+    return RedirectResponse(url=f"/soporte#tab-{tabla}", status_code=status.HTTP_303_SEE_OTHER)
+
+@app.get("/admin/eliminar/{tabla}/{item_id}")
+def admin_eliminar_registro(tabla: str, item_id: int, request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    model_class = MODEL_MAP.get(tabla.lower())
+    if model_class:
+        item = db.query(model_class).filter(model_class.id == item_id).first()
+        if item:
+            if tabla == "usuarios" and getattr(item, "username", "") == "admin":
+                pass
+            else:
+                db.delete(item)
+                db.commit()
+
+    return RedirectResponse(url=f"/soporte#tab-{tabla}", status_code=303)
+
+@app.get("/admin/reset-db")
+def reset_database(request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    db.query(models.Alumno).delete()
+    db.query(models.Evento).delete()
+    db.query(models.Emprendimiento).delete()
+    db.commit()
+    db.close()
+
+    cargar_datos.sincronizar_base_de_datos()
+    return RedirectResponse(url="/soporte", status_code=303)
 
 @app.get("/sincronizar")
 def sincronizar_desde_sheets(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
-    if not user:
+    if not user or user.rol not in ["admin", "docente"]:
         return RedirectResponse(url="/login")
-    
-    # Ejecutar la sincronización de las 4 pestañas
     cargar_datos.sincronizar_base_de_datos()
+    return RedirectResponse(url="/soporte" if user.rol == "admin" else "/", status_code=303)
+
+# --- EXPORTACIÓN INDIVIDUAL POR TABLA (CONSERVA HASH DE CONTRASEÑA) ---
+
+@app.get("/admin/exportar-tabla/{tabla}")
+def exportar_tabla_individual(tabla: str, request: Request, db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    model_class = MODEL_MAP.get(tabla.lower())
+    if not model_class:
+        return JSONResponse(status_code=404, content={"error": "Tabla no encontrada"})
+
+    def modelo_a_dict(obj):
+        return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+
+    registros = [modelo_a_dict(row) for row in db.query(model_class).all()]
+    json_str = json.dumps({tabla.lower(): registros}, indent=2, ensure_ascii=False)
     
-    # Redirigir según el rol
-    if user.rol == "admin":
-        return RedirectResponse(url="/soporte", status_code=303)
-    return RedirectResponse(url="/", status_code=303)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{tabla.lower()}_{timestamp}.json"
+
+    return Response(
+        content=json_str,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+# --- IMPORTACIÓN ROBUSTA ---
+
+@app.post("/admin/importar")
+async def importar_base_datos(request: Request, archivo_json: UploadFile = File(...), db: Session = Depends(get_db)):
+    user = auth.get_current_user(request, db)
+    if not user or user.rol != "admin":
+        return RedirectResponse(url="/login")
+
+    contenido = await archivo_json.read()
+    try:
+        data = json.loads(contenido.decode("utf-8"))
+        if isinstance(data, dict):
+            for t_name, registros in data.items():
+                m_cls = MODEL_MAP.get(t_name.lower())
+                if not m_cls or not isinstance(registros, list):
+                    continue
+
+                for r in registros:
+                    if not isinstance(r, dict):
+                        continue
+
+                    r.pop("id", None)
+
+                    if t_name.lower() == "usuarios":
+                        username = r.get("username", "").strip()
+                        if not username:
+                            continue
+
+                        pass_hash = r.get("password_hash")
+                        if not pass_hash or pass_hash == "PROTEGIDO":
+                            r["password_hash"] = auth.get_password_hash("admin123Kinder*" if username == "admin" else username)
+
+                        usuario_existente = db.query(models.Usuario).filter(models.Usuario.username == username).first()
+                        if usuario_existente:
+                            usuario_existente.nombre_completo = r.get("nombre_completo", usuario_existente.nombre_completo)
+                            usuario_existente.email = r.get("email", usuario_existente.email)
+                            usuario_existente.rol = r.get("rol", usuario_existente.rol)
+                            usuario_existente.password_hash = r["password_hash"]
+                            usuario_existente.requiere_cambio_pass = r.get("requiere_cambio_pass", False)
+                        else:
+                            db.add(m_cls(**r))
+                    else:
+                        db.add(m_cls(**r))
+
+            db.commit()
+    except Exception as e:
+        print(f"Error al importar JSON: {e}")
+
+    return RedirectResponse(url="/soporte", status_code=303)

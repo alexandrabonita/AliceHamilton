@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-8 col-lg-6">
+
+    {% if forzar %}
+    <div class="alert alert-warning border-0 shadow-sm rounded-4 mb-4 p-3 d-flex align-items-center gap-3">
+      <i class="bi bi-shield-exclamation display-6 text-warning"></i>
+      <div>
+        <h6 class="fw-bold mb-0">Se requiere cambio de contraseña</h6>
+        <small>Tu contraseña fue restablecida temporalmente. Por seguridad, define una nueva para continuar navegando.</small>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if mensaje %}
+    <div class="alert alert-success rounded-4 shadow-sm mb-3">
+      <i class="bi bi-check-circle-fill me-2"></i> {{ mensaje }}
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-danger rounded-4 shadow-sm mb-3">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i> {{ error }}
+    </div>
+    {% endif %}
+
+    <!-- TARJETA 1: DATOS PERSONALES -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+      <div class="d-flex align-items-center gap-3 mb-3">
+        <div class="bg-primary text-white rounded-circle p-3 d-flex align-items-center justify-content-center" style="width: 55px; height: 55px;">
+          <i class="bi bi-person-fill fs-3"></i>
+        </div>
+        <div>
+          <h5 class="fw-bold mb-0">{{ user.nombre_completo }}</h5>
+          <span class="badge bg-primary-subtle text-primary border border-primary-subtle fw-bold">{{ user.rol | upper }}</span>
+        </div>
+      </div>
+
+      <form action="/perfil/actualizar-datos" method="post">
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Usuario de Acceso</label>
+          <input type="text" class="form-control bg-light" value="{{ user.username }}" readonly>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Nombre Completo</label>
+          <input type="text" name="nombre_completo" class="form-control" value="{{ user.nombre_completo }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Correo Electrónico (Notificaciones)</label>
+          <input type="email" name="email" class="form-control" value="{{ user.email or '' }}" placeholder="ejemplo@correo.com" required>
+        </div>
+        <button type="submit" class="btn btn-outline-primary w-100 fw-bold">Guardar Datos</button>
+      </form>
+    </div>
+
+    <!-- TARJETA 2: CAMBIO DE CONTRASEÑA -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+      <h5 class="fw-bold text-dark mb-3"><i class="bi bi-key-fill text-warning"></i> Cambiar Contraseña</h5>
+      
+      <form action="/perfil/cambiar-password" method="post">
+        {% if not forzar %}
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Contraseña Actual</label>
+          <input type="password" name="pass_actual" class="form-control" required>
+        </div>
+        {% endif %}
+
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Nueva Contraseña</label>
+          <input type="password" name="pass_nuevo" class="form-control" placeholder="Mínimo 6 caracteres" required>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Confirmar Nueva Contraseña</label>
+          <input type="password" name="pass_confirm" class="form-control" required>
+        </div>
+
+        <button type="submit" class="btn btn-warning w-100 fw-bold shadow-sm">Actualizar Contraseña</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

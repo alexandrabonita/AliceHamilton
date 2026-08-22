@@ -5,10 +5,12 @@ class Usuario(Base):
     __tablename__ = "usuarios"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, default="")
     nombre_completo = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     rol = Column(String, default="padre") # admin, docente, vocal, padre
     activo = Column(Boolean, default=True)
+    requiere_cambio_pass = Column(Boolean, default=False)
 
 class Alumno(Base):
     __tablename__ = "alumnos"
@@ -41,18 +43,26 @@ class Evento(Base):
     __tablename__ = "eventos"
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String, nullable=False)
-    fecha = Column(String, nullable=False) # Formato YYYY-MM-DD
-    responsable = Column(String, default="") # en los cumpleaños el responsable es el padre o tutor
+    fecha = Column(String, nullable=False)
+    responsable = Column(String, default="")
     lugar = Column(String, default="")
     tipo = Column(String, default="Evento General")
     descripcion = Column(Text, default="")
     notas = Column(Text, default="")
+
+class Aviso(Base):
+    __tablename__ = "avisos"
+    id = Column(Integer, primary_key=True, index=True)
+    titulo = Column(String, nullable=False)
+    contenido = Column(Text, nullable=False)
+    fecha = Column(String)
+    autor = Column(String, default="Mesa Directiva")
 
 class CursoTaller(Base):
     __tablename__ = "cursos_talleres"
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String, nullable=False)
     instructor = Column(String)
-    tipo = Column(String, default="Escuela para Padres") # Escuela para Padres, Taller Práctico, Charla
+    tipo = Column(String, default="Escuela para Padres")
     descripcion = Column(Text)
-    enlace_recurso = Column(String) # Link a video, Drive o PDF
+    enlace_recurso = Column(String)

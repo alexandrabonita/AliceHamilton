@@ -22,53 +22,31 @@
       <div class="collapse navbar-collapse" id="navMenu">
         {% if user %}
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item">
-            <a class="nav-link" href="/"><i class="bi bi-house-door"></i> Inicio</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/alumnos"><i class="bi bi-people"></i> Directorio</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/calendario"><i class="bi bi-calendar-month"></i> Calendario</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/ventas"><i class="bi bi-shop"></i> Ventas</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/avisos"><i class="bi bi-megaphone"></i> Avisos</a>
-          </li>
+          <li class="nav-item"><a class="nav-link" href="/"><i class="bi bi-house-door"></i> Inicio</a></li>
+          <li class="nav-item"><a class="nav-link" href="/alumnos"><i class="bi bi-people"></i> Directorio</a></li>
+          <li class="nav-item"><a class="nav-link" href="/calendario"><i class="bi bi-calendar-month"></i> Calendario</a></li>
+          <li class="nav-item"><a class="nav-link" href="/ventas"><i class="bi bi-shop"></i> Ventas</a></li>
+          <li class="nav-item"><a class="nav-link" href="/avisos"><i class="bi bi-megaphone"></i> Avisos</a></li>
           
-          <!-- Exclusivo Docente y Admin -->
           {% if user.rol in ['admin', 'docente'] %}
-          <li class="nav-item">
-            <a class="nav-link text-warning fw-bold" href="/docentes">
-              <i class="bi bi-shield-lock-fill"></i> Docentes (Salud)
-            </a>
-          </li>
+          <li class="nav-item"><a class="nav-link text-warning fw-bold" href="/docentes"><i class="bi bi-shield-lock-fill"></i> Docentes (Salud)</a></li>
           {% endif %}
           
-          <!-- Exclusivo Desarrollador / Soporte -->
           {% if user.rol == 'admin' %}
-          <li class="nav-item">
-            <a class="nav-link text-info fw-bold" href="/soporte">
-              <i class="bi bi-gear-fill"></i> Soporte TI
-            </a>
-          </li>
+          <li class="nav-item"><a class="nav-link text-info fw-bold" href="/soporte"><i class="bi bi-gear-fill"></i> Soporte TI</a></li>
           {% endif %}
         </ul>
         
         <div class="d-flex align-items-center gap-2">
-          <span class="badge bg-light text-dark py-2 px-3">
-            <i class="bi bi-person-circle text-primary"></i> {{ user.nombre_completo }} 
-            <span class="text-uppercase fw-bold text-muted">({{ user.rol }})</span>
-          </span>
+          <!-- BOTÓN DE PERFIL -->
+          <a href="/perfil" class="btn btn-sm btn-light text-primary fw-bold shadow-sm">
+            <i class="bi bi-person-circle"></i> {{ user.nombre_completo }} <span class="badge bg-primary text-white ms-1">{{ user.rol | upper }}</span>
+          </a>
           <a href="/logout" class="btn btn-sm btn-outline-light"><i class="bi bi-box-arrow-right"></i> Salir</a>
         </div>
         {% else %}
         <ul class="navbar-nav ms-auto">
-          <li class="nav-item">
-            <a class="btn btn-light btn-sm fw-bold px-3" href="/login"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a>
-          </li>
+          <li class="nav-item"><a class="btn btn-light btn-sm fw-bold px-3" href="/login"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a></li>
         </ul>
         {% endif %}
       </div>

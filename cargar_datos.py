@@ -1,68 +1,93 @@
 import csv
 import io
+import urllib.parse
 import requests
 from database import SessionLocal
 import models
 
 SPREADSHEET_ID = "1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk"
 
-def obtener_datos_hoja(sheet_name=None):
-    if sheet_name:
-        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    else:
-        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
-    
+MESES_MAP = {
+    "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
+    "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
+    "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"
+}
+
+def normalizar_texto(texto: str) -> str:
+    return " ".join(texto.strip().split()) if texto else ""
+
+def armar_fecha_iso(mes_str: str, dia_str: str, anio_str: str = "2026") -> str:
+    """Convierte mes (nombre/número), día y año a formato YYYY-MM-DD."""
+    if not mes_str or not dia_str:
+        return ""
+    m_clean = mes_str.lower().strip()
+    mes_num = MESES_MAP.get(m_clean, m_clean.zfill(2) if m_clean.isdigit() else "01")
+    dia_num = dia_str.strip().zfill(2)
+    anio_num = anio_str.strip() if anio_str and anio_str.strip().isdigit() else "2026"
+    return f"{anio_num}-{mes_num}-{dia_num}"
+
+def obtener_filas_pestana(nombre_pestana: str):
+    """Descarga los datos CSV de una pestaña específica de Google Sheets."""
+    sheet_encoded = urllib.parse.quote(nombre_pestana)
+    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers)
-    response.encoding = 'utf-8'
-    if response.status_code != 200:
-        return []
-    return list(csv.reader(io.StringIO(response.text)))
+    try:
+        res = requests.get(url, headers=headers, timeout=12)
+        res.encoding = 'utf-8'
+        if res.status_code == 200:
+            return list(csv.reader(io.StringIO(res.text)))
+    except Exception as e:
+        print(f"Error al descargar la pestaña '{nombre_pestana}': {e}")
+    return []
+
+def fusionar_textos(texto_orig: str, texto_nuevo: str) -> str:
+    """Concatena notas o detalles sin duplicar cadenas idénticas."""
+    orig = (texto_orig or "").strip()
+    nuevo = (texto_nuevo or "").strip()
+    if not nuevo or nuevo.lower() in orig.lower():
+        return orig
+    if not orig:
+        return nuevo
+    return f"{orig} | {nuevo}"
 
 def sincronizar_base_de_datos():
     db = SessionLocal()
-    filas = obtener_datos_hoja()
-    if not filas:
-        print("No se pudieron obtener datos del Google Sheet.")
-        return
+    print("Iniciando sincronización completa con Google Sheets...")
 
-    # Lista de actividades de ejemplo si no están en el sheet
-    actividades_ejemplo = [
-        "Ballet", "Gimnasia", "Natación", "Arte y pintura", "Danza", 
-        "Fútbol", "Taekwondo", "Música", "Robótica / Fútbol", "Patinaje", 
-        "Ajedrez infantil", "Natación"
-    ]
-
-    for idx, row in enumerate(filas):
+    # =========================================================================
+    # 1. PESTAÑA: Directorio y Ficha Alumnos
+    # =========================================================================
+    filas_directorio = obtener_filas_pestana("Directorio y Ficha Alumnos")
+    for row in filas_directorio:
         if len(row) < 2 or not row[1].strip() or "Nombre Completo" in row[1] or "DATOS BÁSICOS" in row[0]:
             continue
 
-        nombre = row[1].strip()
-        cumpleanos = row[2].strip() if len(row) > 2 else ""
+        nombre = normalizar_texto(row[1])
+        cumpleanos = normalizar_texto(row[2]) if len(row) > 2 else ""
         edad = int(row[3].strip()) if len(row) > 3 and row[3].strip().isdigit() else 5
-        tutor_nombre = row[4].strip() if len(row) > 4 else ""
-        tutor_telefono = row[5].strip() if len(row) > 5 else ""
-        alergias = row[7].strip() if len(row) > 7 and row[7].strip() else "Ninguna reportada"
-        cuidados = row[11].strip() if len(row) > 11 and row[11].strip() else "Ninguno"
-        color = row[12].strip() if len(row) > 12 else ""
-        personaje = row[13].strip() if len(row) > 13 else ""
-        festeja = row[16].strip() if len(row) > 16 and row[16].strip() else "Por confirmar"
-        talla = row[19].strip() if len(row) > 19 and row[19].strip() else "Talla 6"
-        extra = row[20].strip() if len(row) > 20 and row[20].strip() else actividades_ejemplo[idx % len(actividades_ejemplo)]
+        tutor_nombre = normalizar_texto(row[4]) if len(row) > 4 else ""
+        tutor_telefono = normalizar_texto(row[5]) if len(row) > 5 else ""
+        alergias = normalizar_texto(row[7]) if len(row) > 7 and row[7].strip() else "Ninguna reportada"
+        cuidados = normalizar_texto(row[11]) if len(row) > 11 and row[11].strip() else "Ninguno"
+        color = normalizar_texto(row[12]) if len(row) > 12 else ""
+        personaje = normalizar_texto(row[13]) if len(row) > 13 else ""
+        festeja = normalizar_texto(row[16]) if len(row) > 16 and row[16].strip() else "Por confirmar"
+        talla = normalizar_texto(row[19]) if len(row) > 19 and row[19].strip() else "Talla 6"
+        extra = normalizar_texto(row[20]) if len(row) > 20 and row[20].strip() else "Ninguna"
 
         alumno = db.query(models.Alumno).filter(models.Alumno.nombre == nombre).first()
         if alumno:
-            alumno.cumpleanos = cumpleanos
+            alumno.cumpleanos = cumpleanos or alumno.cumpleanos
             alumno.edad = edad
-            alumno.tutor_nombre = tutor_nombre
-            alumno.tutor_telefono = tutor_telefono
-            alumno.alergias = alergias
-            alumno.cuidados_medicos = cuidados
-            alumno.color_favorito = color
-            alumno.personaje_favorito = personaje
-            alumno.festeja_escuela = festeja
-            alumno.talla = talla
-            alumno.extraescolar = extra
+            alumno.tutor_nombre = tutor_nombre or alumno.tutor_nombre
+            alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
+            alumno.alergias = fusionar_textos(alumno.alergias, alergias)
+            alumno.cuidados_medicos = fusionar_textos(alumno.cuidados_medicos, cuidados)
+            alumno.color_favorito = color or alumno.color_favorito
+            alumno.personaje_favorito = personaje or alumno.personaje_favorito
+            alumno.festeja_escuela = festeja or alumno.festeja_escuela
+            alumno.talla = talla or alumno.talla
+            alumno.extraescolar = extra or alumno.extraescolar
         else:
             db.add(models.Alumno(
                 nombre=nombre, cumpleanos=cumpleanos, edad=edad,
@@ -72,42 +97,133 @@ def sincronizar_base_de_datos():
                 festeja_escuela=festeja, talla=talla, extraescolar=extra
             ))
 
-    # Sembrar datos iniciales de Eventos y Escuela para Padres si no existen
-    if db.query(models.Evento).count() == 0:
-        db.add(models.Evento(
-            titulo="Festejo de Cumpleaños del Mes",
-            fecha="28 de Octubre",
-            lugar="Patio Central Kínder",
-            tipo="Festejo",
-            descripcion="Convivio para los cumpleañeros del mes. Recuerden checar la lista de alergias antes de enviar postres."
-        ))
-        db.add(models.Evento(
-            titulo="Festival de Primavera & Disfraces",
-            fecha="15 de Noviembre",
-            lugar="Auditorio Escolar",
-            tipo="Festival",
-            descripcion="Presentación artística de los alumnos. Vestuario y detalles coordinados con vocales."
-        ))
+    # =========================================================================
+    # 2. PESTAÑA: Calendario Cumpleaños
+    # =========================================================================
+    filas_cumple = obtener_filas_pestana("Calendario Cumpleaños")
+    for row in filas_cumple:
+        if len(row) < 3:
+            continue
+        mes = normalizar_texto(row[0])
+        dia = normalizar_texto(row[1])
+        nombre = normalizar_texto(row[2])
 
-    if db.query(models.CursoTaller).count() == 0:
-        db.add(models.CursoTaller(
-            titulo="Taller: Loncheras Saludables y Nutrición Infantil",
-            instructor="Lic. Fernanda Ramírez (Nutrióloga / Mamá del grupo)",
-            tipo="Escuela para Padres",
-            descripcion="Consejos prácticos para preparar loncheras balanceadas, nutritivas y atractivas para niños de preescolar.",
-            enlace_recurso="https://youtube.com"
-        ))
-        db.add(models.CursoTaller(
-            titulo="Taller de Manualidades y Moños con Listón",
-            instructor="Jaqueline Orozco (Emprendedora / Mamá del grupo)",
-            tipo="Taller Práctico",
-            descripcion="Aprende técnicas básicas de creación de accesorios y adornos infantiles para eventos.",
-            enlace_recurso="https://drive.google.com"
-        ))
+        if not nombre or "Nombre del Alumno" in nombre or "CRONOGRAMA" in mes:
+            continue
+
+        tutor_nombre = normalizar_texto(row[3]) if len(row) > 3 else ""
+        tutor_telefono = normalizar_texto(row[4]) if len(row) > 4 else ""
+        festeja = normalizar_texto(row[5]) if len(row) > 5 else "Por confirmar"
+        notas_cumple = normalizar_texto(row[6]) if len(row) > 6 else ""
+
+        cumple_formateado = f"{dia} de {mes.lower()}" if (dia and mes) else ""
+
+        alumno = db.query(models.Alumno).filter(models.Alumno.nombre == nombre).first()
+        if alumno:
+            if cumple_formateado:
+                alumno.cumpleanos = cumple_formateado
+            alumno.tutor_nombre = tutor_nombre or alumno.tutor_nombre
+            alumno.tutor_telefono = tutor_telefono or alumno.tutor_telefono
+            alumno.festeja_escuela = festeja or alumno.festeja_escuela
+            alumno.cuidados_medicos = fusionar_textos(alumno.cuidados_medicos, notas_cumple)
+        else:
+            db.add(models.Alumno(
+                nombre=nombre,
+                cumpleanos=cumple_formateado,
+                tutor_nombre=tutor_nombre,
+                tutor_telefono=tutor_telefono,
+                festeja_escuela=festeja,
+                cuidados_medicos=notas_cumple or "Ninguno",
+                alergias="Ninguna reportada",
+                extraescolar="Ninguna",
+                talla="Talla 6"
+            ))
+
+    # =========================================================================
+    # 3. PESTAÑA: Calendario Eventos (Mes, Día, Año, Título, Tipo, Responsable, Lugar, Descripción, Notas)
+    # =========================================================================
+    filas_eventos = obtener_filas_pestana("Calendario Eventos")
+    for row in filas_eventos:
+        if len(row) < 4:
+            continue
+        mes = normalizar_texto(row[0])
+        dia = normalizar_texto(row[1])
+        anio = normalizar_texto(row[2]) if len(row) > 2 else "2026"
+        titulo = normalizar_texto(row[3]) if len(row) > 3 else ""
+
+        if not titulo or "Título Evento" in titulo or "CRONOGRAMA" in mes:
+            continue
+
+        fecha_iso = armar_fecha_iso(mes, dia, anio)
+        tipo = normalizar_texto(row[4]) if len(row) > 4 else "Evento General"
+        responsable = normalizar_texto(row[5]) if len(row) > 5 else "Dirección / Comité"
+        lugar = normalizar_texto(row[6]) if len(row) > 6 else "Colegio"
+        descripcion = normalizar_texto(row[7]) if len(row) > 7 else ""
+        notas = normalizar_texto(row[8]) if len(row) > 8 else ""
+
+        evento_existente = db.query(models.Evento).filter(
+            models.Evento.titulo == titulo,
+            models.Evento.fecha == fecha_iso
+        ).first()
+
+        if evento_existente:
+            evento_existente.tipo = tipo or evento_existente.tipo
+            evento_existente.responsable = responsable or evento_existente.responsable
+            evento_existente.lugar = lugar or evento_existente.lugar
+            evento_existente.descripcion = fusionar_textos(evento_existente.descripcion, descripcion)
+            evento_existente.notas = fusionar_textos(evento_existente.notas, notas)
+        else:
+            db.add(models.Evento(
+                titulo=titulo,
+                fecha=fecha_iso,
+                tipo=tipo,
+                responsable=responsable,
+                lugar=lugar,
+                descripcion=descripcion,
+                notas=notas
+            ))
+
+    # =========================================================================
+    # 4. PESTAÑA: Comunidad y Red de Padres (Emprendimientos / Cursos)
+    # =========================================================================
+    filas_red = obtener_filas_pestana("Comunidad y Red de Padres")
+    for row in filas_red:
+        if len(row) < 3 or "Nombre" in row[0] or "RED DE" in row[0]:
+            continue
+        padre_nombre = normalizar_texto(row[0])
+        negocio_titulo = normalizar_texto(row[1])
+        giro = normalizar_texto(row[2]) if len(row) > 2 else "Comercio General"
+        descripcion = normalizar_texto(row[3]) if len(row) > 3 else ""
+        taller = normalizar_texto(row[4]) if len(row) > 4 else ""
+        telefono = normalizar_texto(row[5]) if len(row) > 5 else ""
+
+        if not negocio_titulo and not padre_nombre:
+            continue
+
+        emp = db.query(models.Emprendimiento).filter(
+            models.Emprendimiento.padre_nombre == padre_nombre,
+            models.Emprendimiento.titulo_producto == negocio_titulo
+        ).first()
+
+        if emp:
+            emp.giro = giro or emp.giro
+            emp.descripcion_oferta = fusionar_textos(emp.descripcion_oferta, descripcion)
+            emp.taller_que_ofrece = fusionar_textos(emp.taller_que_ofrece, taller)
+            emp.telefono_contacto = telefono or emp.telefono_contacto
+        else:
+            db.add(models.Emprendimiento(
+                padre_nombre=padre_nombre,
+                titulo_producto=negocio_titulo or "Emprendimiento Familiar",
+                giro=giro,
+                descripcion_oferta=descripcion,
+                taller_que_ofrece=taller,
+                telefono_contacto=telefono,
+                fecha_publicacion="2026"
+            ))
 
     db.commit()
     db.close()
-    print("¡Sincronización completa con datos extraescolares, eventos y cursos!")
+    print("¡Sincronización de todas las pestañas completada con éxito!")
 
 if __name__ == "__main__":
     sincronizar_base_de_datos()

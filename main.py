@@ -338,10 +338,17 @@ def ver_soporte(request: Request, db: Session = Depends(get_db)):
     usuarios = db.query(models.Usuario).all()
     return templates.TemplateResponse(request=request, name="soporte.html", context={"usuarios": usuarios, "user": user})
 
+
 @app.get("/sincronizar")
 def sincronizar_desde_sheets(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
-    if not user or user.rol not in ["admin", "docente"]:
-        return RedirectResponse(url="/")
+    if not user:
+        return RedirectResponse(url="/login")
+    
+    # Ejecutar la sincronización de las 4 pestañas
     cargar_datos.sincronizar_base_de_datos()
-    return RedirectResponse(url="/soporte" if user.rol == "admin" else "/", status_code=303)
+    
+    # Redirigir según el rol
+    if user.rol == "admin":
+        return RedirectResponse(url="/soporte", status_code=303)
+    return RedirectResponse(url="/", status_code=303)

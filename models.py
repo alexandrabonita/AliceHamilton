@@ -41,10 +41,12 @@ class Evento(Base):
     __tablename__ = "eventos"
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String, nullable=False)
-    fecha = Column(String, nullable=False)
-    lugar = Column(String)
-    descripcion = Column(Text)
-    tipo = Column(String, default="Festejo") # Festejo, Festival, Taller, Junta
+    fecha = Column(String, nullable=False) # Formato YYYY-MM-DD
+    responsable = Column(String, default="") # en los cumpleaños el responsable es el padre o tutor
+    lugar = Column(String, default="")
+    tipo = Column(String, default="Evento General")
+    descripcion = Column(Text, default="")
+    notas = Column(Text, default="")
 
 class CursoTaller(Base):
     __tablename__ = "cursos_talleres"

@@ -22,13 +22,23 @@
       <div class="collapse navbar-collapse" id="navMenu">
         {% if user %}
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item"><a class="nav-link" href="/"><i class="bi bi-house-door"></i> Inicio</a></li>
-          <li class="nav-item"><a class="nav-link" href="/alumnos"><i class="bi bi-people"></i> Directorio</a></li>
-          <li class="nav-item"><a class="nav-link" href="/calendario"><i class="bi bi-calendar-event"></i> Cumpleaños</a></li>
-          <li class="nav-item"><a class="nav-link" href="/ventas"><i class="bi bi-shop"></i> Ventas</a></li>
-          <li class="nav-item"><a class="nav-link" href="/avisos"><i class="bi bi-megaphone"></i> Avisos</a></li>
+          <li class="nav-item">
+            <a class="nav-link" href="/"><i class="bi bi-house-door"></i> Inicio</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/alumnos"><i class="bi bi-people"></i> Directorio</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/calendario"><i class="bi bi-calendar-month"></i> Calendario</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/ventas"><i class="bi bi-shop"></i> Ventas</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/avisos"><i class="bi bi-megaphone"></i> Avisos</a>
+          </li>
           
-          <!-- Solo visible para Docentes y Admin -->
+          <!-- Exclusivo Docente y Admin -->
           {% if user.rol in ['admin', 'docente'] %}
           <li class="nav-item">
             <a class="nav-link text-warning fw-bold" href="/docentes">
@@ -37,7 +47,7 @@
           </li>
           {% endif %}
           
-          <!-- Solo visible para Desarrollador / Soporte -->
+          <!-- Exclusivo Desarrollador / Soporte -->
           {% if user.rol == 'admin' %}
           <li class="nav-item">
             <a class="nav-link text-info fw-bold" href="/soporte">
@@ -56,7 +66,9 @@
         </div>
         {% else %}
         <ul class="navbar-nav ms-auto">
-          <li class="nav-item"><a class="btn btn-light btn-sm fw-bold px-3" href="/login"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a></li>
+          <li class="nav-item">
+            <a class="btn btn-light btn-sm fw-bold px-3" href="/login"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a>
+          </li>
         </ul>
         {% endif %}
       </div>

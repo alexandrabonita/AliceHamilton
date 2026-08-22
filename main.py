@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime
+import json
+import re
 import os
 
 import models
@@ -13,9 +15,28 @@ from database import engine, get_db, SessionLocal
 import auth
 import cargar_datos
 
+# Mapeo de meses en español a números de dos dígitos
+MESES_MAP = {
+    "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
+    "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
+    "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"
+}
+
+def parsear_fecha_cumple(texto_cumple, anio_actual=2026):
+    """Convierte cadenas como '15 de marzo' o '4 de enero' a formato 'YYYY-MM-DD'."""
+    if not texto_cumple:
+        return None
+    texto = texto_cumple.lower().strip()
+    match = re.search(r'(\d{1,2})\s*(?:de)?\s*([a-záéíóú]+)', texto)
+    if match:
+        dia = int(match.group(1))
+        mes_nombre = match.group(2)
+        mes = MESES_MAP.get(mes_nombre, "01")
+        return f"{anio_actual}-{mes}-{dia:02d}"
+    return None
 
 def inicializar_datos_servidor():
-    """Crea los usuarios y sincroniza datos si la BD arranca vacía en Render."""
+    """Crea los usuarios y sincroniza datos si la BD arranca vacía en Render o local."""
     models.Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
@@ -52,13 +73,10 @@ def inicializar_datos_servidor():
         except Exception as e:
             print(f"Error en sincronización inicial: {e}")
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Esto se ejecuta automáticamente al iniciar la aplicación en Render o Local
     inicializar_datos_servidor()
     yield
-
 
 app = FastAPI(title="Comunidad Alice Hamilton Kinder 3", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key="kinder-secret-key-super-segura-2026")
@@ -134,8 +152,57 @@ def ver_calendario(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
+    
     alumnos = db.query(models.Alumno).all()
-    return templates.TemplateResponse(request=request, name="calendario.html", context={"alumnos": alumnos, "user": user})
+    eventos_db = db.query(models.Evento).all()
+    
+    eventos_calendario = []
+    
+    # 1. Cumpleaños de Alumnos (Responsable: Padre/Tutor de familia)
+    for a in alumnos:
+        fecha_iso = parsear_fecha_cumple(a.cumpleanos)
+        if fecha_iso:
+            eventos_calendario.append({
+                "title": f"🎂 {a.nombre}",
+                "start": fecha_iso,
+                "color": "#f59e0b",
+                "textColor": "#ffffff",
+                "extendedProps": {
+                    "tipo": "Cumpleaños",
+                    "responsable": a.tutor_nombre or "Padre / Tutor de Familia",
+                    "tutor": a.tutor_nombre or "No especificado",
+                    "telefono": a.tutor_telefono or "Sin registrar",
+                    "festeja": a.festeja_escuela or "Por confirmar",
+                    "gustos": f"{a.personaje_favorito} (Color: {a.color_favorito})" if (a.personaje_favorito or a.color_favorito) else "No especificado",
+                    "notas": "Festejo de cumpleaños del alumno"
+                }
+            })
+            
+    # 2. Eventos Escolares Registrados
+    for ev in eventos_db:
+        fecha_final = ev.fecha if "-" in ev.fecha else (parsear_fecha_cumple(ev.fecha) or "2026-09-01")
+        eventos_calendario.append({
+            "title": f"📌 {ev.titulo}",
+            "start": fecha_final,
+            "color": "#2563eb",
+            "textColor": "#ffffff",
+            "extendedProps": {
+                "tipo": ev.tipo or "Evento General",
+                "responsable": ev.responsable or "Comité Organizador",
+                "lugar": ev.lugar or "Colegio",
+                "descripcion": ev.descripcion or "",
+                "notas": ev.notas or ""
+            }
+        })
+        
+    return templates.TemplateResponse(
+        request=request,
+        name="calendario.html",
+        context={
+            "user": user,
+            "eventos_json": json.dumps(eventos_calendario)
+        }
+    )
 
 @app.get("/ventas", response_class=HTMLResponse)
 def ver_ventas(request: Request, db: Session = Depends(get_db)):
@@ -204,21 +271,25 @@ def publicar_evento(
     request: Request,
     titulo: str = Form(...),
     fecha: str = Form(...),
-    lugar: str = Form(...),
-    tipo: str = Form(...),
-    descripcion: str = Form(...),
+    responsable: str = Form(""),
+    lugar: str = Form(""),
+    tipo: str = Form("Evento General"),
+    descripcion: str = Form(""),
+    notas: str = Form(""),
     db: Session = Depends(get_db)
 ):
     user = auth.get_current_user(request, db)
-    if not user or user.rol not in ["admin", "docente", "vocal"]:
-        return RedirectResponse(url="/")
+    if not user:
+        return RedirectResponse(url="/login")
 
     nuevo_evento = models.Evento(
         titulo=titulo,
         fecha=fecha,
+        responsable=responsable,
         lugar=lugar,
         tipo=tipo,
-        descripcion=descripcion
+        descripcion=descripcion,
+        notas=notas
     )
     db.add(nuevo_evento)
     db.commit()

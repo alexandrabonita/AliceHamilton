@@ -1,29 +1,205 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h3 class="text-warning mb-0"><i class="bi bi-calendar-event"></i> Calendario de Cumpleaños y Festejos</h3>
-  <a href="https://docs.google.com/spreadsheets/d/1SNKtgPK2W1adPuyWpPnNTONX_faoje50dQ4n3yyt8vk/edit?usp=sharing" target="_blank" class="btn btn-sm btn-outline-secondary">
-    <i class="bi bi-file-earmark-spreadsheet"></i> Ver Google Sheet
-  </a>
+<!-- ESTILOS Y CDN DE FULLCALENDAR (CON SOPORTE DE CLIC EN DÍAS) -->
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.10/locales/es.global.min.js"></script>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h3 class="fw-bold text-primary mb-0"><i class="bi bi-calendar-month"></i> Calendario Escolar</h3>
+    <small class="text-muted">Haz clic en cualquier día o presiona el botón para agregar un evento</small>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <span class="badge bg-warning text-dark px-2 py-1"><i class="bi bi-cake2"></i> Cumpleaños</span>
+    <span class="badge bg-primary px-2 py-1"><i class="bi bi-calendar-event"></i> Eventos</span>
+    <button class="btn btn-primary rounded-pill px-3 shadow-sm" onclick="abrirModalNuevoEvento('')">
+      <i class="bi bi-plus-circle-fill"></i> Agregar Evento
+    </button>
+  </div>
 </div>
 
-<div class="row row-cols-1 row-cols-md-3 g-3">
-  {% for a in alumnos %}
-  <div class="col">
-    <div class="card h-100 shadow-sm border-0">
-      <div class="card-header bg-warning bg-opacity-25 fw-bold text-dark">
-        🎂 {{ a.cumpleanos }}
+<!-- CONTENEDOR DEL CALENDARIO -->
+<div class="card shadow-sm border-0 rounded-4 p-3 bg-white mb-4">
+  <div id="calendar"></div>
+</div>
+
+<!-- MODAL 1: REGISTRAR NUEVO EVENTO (BOTÓN O CLIC EN DÍA) -->
+<div class="modal fade" id="modalFormularioEvento" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4 border-0">
+      <form action="/publicar-evento" method="post">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title fw-bold"><i class="bi bi-calendar-plus"></i> Registrar Evento</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nombre del Evento *</label>
+            <input type="text" name="titulo" class="form-control" placeholder="Ej. Festival de Disfraces, Paseo al Parque..." required>
+          </div>
+          
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label small fw-bold">Fecha *</label>
+              <input type="date" name="fecha" id="inputFechaEvento" class="form-control" required>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label small fw-bold">Tipo de Evento</label>
+              <select name="tipo" class="form-select">
+                <option value="Festival">Festival / Actuación</option>
+                <option value="Festejo">Festejo / Convivio</option>
+                <option value="Junta de Padres">Junta de Padres</option>
+                <option value="Paseo Escolar">Paseo Escolar</option>
+                <option value="Taller">Taller / Clase Abierta</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label small fw-bold">Responsable / Organizador</label>
+              <input type="text" name="responsable" class="form-control" placeholder="Ej. Vocal de grupo / Maestra">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label small fw-bold">Lugar</label>
+              <input type="text" name="lugar" class="form-control" placeholder="Ej. Salón de Actos / Patio">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Descripción del Evento</label>
+            <textarea name="descripcion" class="form-control" rows="2" placeholder="Detalles de la actividad, horarios, requisitos..."></textarea>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small fw-bold">Notas Adicionales (Opcional)</label>
+            <textarea name="notas" class="form-control" rows="2" placeholder="Material que deben llevar, cuotas, vestuario..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary fw-bold px-4">Guardar en Calendario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 2: VER DETALLES DE UN EVENTO EXISTENTE AL DAR CLIC -->
+<div class="modal fade" id="modalDetalle" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header text-white" id="modalHeaderBg">
+        <h5 class="modal-title fw-bold" id="modalDetalleTitulo">Detalles del Evento</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <div class="card-body">
-        <h5 class="card-title text-primary">{{ a.nombre }}</h5>
-        <p class="card-text mb-1"><strong>Contacto:</strong> {{ a.tutor_nombre }}</p>
-        <p class="card-text mb-2"><strong>Tel:</strong> <a href="tel:{{ a.tutor_telefono }}" class="text-decoration-none">{{ a.tutor_telefono }}</a></p>
-        <span class="badge {% if 'Sí' in a.festeja_escuela or 'si' in a.festeja_escuela.lower() %}bg-success{% else %}bg-secondary{% endif %}">
-          {{ a.festeja_escuela }}
-        </span>
+      <div class="modal-body p-4" id="modalDetalleCuerpo">
+        <!-- Render dinámico vía JS -->
+      </div>
+      <div class="modal-footer bg-light py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
       </div>
     </div>
   </div>
-  {% endfor %}
 </div>
+
+<!-- SCRIPT DE FULLCALENDAR CON INTERACCIÓN TOTAL -->
+<script>
+let modalNuevoEventoInstance = null;
+
+function abrirModalNuevoEvento(fechaSeleccionada) {
+  if (fechaSeleccionada) {
+    document.getElementById('inputFechaEvento').value = fechaSeleccionada;
+  }
+  if (!modalNuevoEventoInstance) {
+    modalNuevoEventoInstance = new bootstrap.Modal(document.getElementById('modalFormularioEvento'));
+  }
+  modalNuevoEventoInstance.show();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const calendarEl = document.getElementById('calendar');
+  const eventosData = {{ eventos_json | safe }};
+
+  const calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: 'dayGridMonth',
+    locale: 'es',
+    firstDay: 1, // Semana comienza en Lunes
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,listMonth'
+    },
+    buttonText: {
+      today: 'Hoy',
+      month: 'Mes',
+      list: 'Agenda'
+    },
+    events: eventosData,
+    selectable: true,
+    
+    // 1. CLIC EN UN DÍA DEL CALENDARIO: Abre modal para crear evento con fecha prellenada
+    dateClick: function(info) {
+      abrirModalNuevoEvento(info.dateStr);
+    },
+
+    // 2. CLIC EN UN EVENTO O CUMPLEAÑOS: Muestra detalles completos
+    eventClick: function(info) {
+      info.jsEvent.preventDefault();
+      const props = info.event.extendedProps;
+      const titulo = info.event.title;
+      const fechaStr = info.event.startStr;
+
+      const modalTitulo = document.getElementById('modalDetalleTitulo');
+      const modalCuerpo = document.getElementById('modalDetalleCuerpo');
+      const headerBg = document.getElementById('modalHeaderBg');
+
+      modalTitulo.innerText = titulo;
+
+      if (props.tipo === 'Cumpleaños') {
+        headerBg.className = 'modal-header bg-warning text-dark';
+        modalCuerpo.innerHTML = `
+          <div class="mb-2"><strong>📅 Fecha:</strong> ${fechaStr}</div>
+          <div class="mb-2"><strong>👤 Mamá / Papá:</strong> ${props.tutor || 'No especificado'}</div>
+          <div class="mb-2"><strong>📞 Teléfono:</strong> <a href="tel:${props.telefono}" class="text-decoration-none">${props.telefono || 'Sin registrar'}</a></div>
+          <div class="mb-2"><strong>🎨 Personaje y Color:</strong> ${props.gustos || 'No especificado'}</div>
+          <div class="alert alert-info p-2 mt-3 mb-0 small">
+            <strong>🏫 Festejo en colegio:</strong> ${props.festeja || 'Por confirmar'}
+          </div>
+        `;
+      } else {
+        headerBg.className = 'modal-header bg-primary text-white';
+        modalCuerpo.innerHTML = `
+          <div class="mb-2"><strong>📅 Fecha:</strong> ${fechaStr}</div>
+          <div class="mb-2"><strong>🏷️ Tipo:</strong> <span class="badge bg-secondary">${props.tipo}</span></div>
+          <div class="mb-2"><strong>👤 Responsable:</strong> ${props.responsable || 'Comité Organizador'}</div>
+          <div class="mb-2"><strong>📍 Lugar:</strong> ${props.lugar || 'Colegio'}</div>
+          <hr class="my-2">
+          <div class="mb-2"><strong>📝 Descripción:</strong><br><span class="text-secondary">${props.descripcion || 'Sin descripción.'}</span></div>
+          ${props.notas ? `<div class="p-2 bg-light rounded small mt-2 border-start border-3 border-warning"><strong>📌 Notas:</strong> ${props.notas}</div>` : ''}
+        `;
+      }
+
+      const modal = new bootstrap.Modal(document.getElementById('modalDetalle'));
+      modal.show();
+    }
+  });
+
+  calendar.render();
+});
+</script>
+
+<style>
+  .fc { font-family: inherit; }
+  .fc-toolbar-title { font-size: 1.3rem !important; font-weight: 700; color: #1e3a8a; }
+  .fc-button-primary { background-color: #2563eb !important; border-color: #2563eb !important; border-radius: 8px !important; }
+  .fc-button-primary:hover { background-color: #1d4ed8 !important; }
+  .fc-event { cursor: pointer; padding: 2px 6px; border-radius: 5px; font-weight: 600; font-size: 0.85rem; border: none; margin-bottom: 2px; }
+  .fc-daygrid-day { cursor: pointer; transition: background-color 0.15s ease; }
+  .fc-daygrid-day:hover { background-color: #f1f5f9; }
+  .fc-day-today { background-color: #eff6ff !important; }
+</style>
 {% endblock %}

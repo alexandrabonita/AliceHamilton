@@ -22,8 +22,58 @@
       </div>
       {% endif %}
 
-      <!-- PASO 1: BÚSQUEDA DEL ALUMNO -->
-      {% if not alumno %}
+      {% if mensaje %}
+      <div class="alert alert-success py-2 px-3 rounded-3 small mb-3">
+        <i class="bi bi-check-circle-fill me-1"></i> {{ mensaje }}
+      </div>
+      {% endif %}
+
+      <!-- CASO 1: YA EXISTE UN USUARIO REGISTRADO PARA ESTE ALUMNO (BLOQUEO Y RECUPERACIÓN) -->
+      {% if ya_registrado %}
+      <div class="alert alert-warning border-0 rounded-4 p-4 mb-4">
+        <div class="d-flex align-items-start gap-3">
+          <i class="bi bi-shield-lock-fill display-6 text-warning"></i>
+          <div>
+            <h5 class="fw-bold text-dark mb-1">Este alumno ya cuenta con un tutor registrado</h5>
+            <p class="small text-muted mb-0">
+              El alumno <strong>{{ alumno_nombre }}</strong> ya tiene una cuenta de usuario vinculada en el sistema. Por seguridad, no es posible registrar otra cuenta ni mostrar los datos de la ficha.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card border border-warning-subtle bg-light rounded-4 p-3 mb-4">
+        <h6 class="fw-bold text-dark mb-2"><i class="bi bi-key-fill text-warning"></i> ¿Olvidaste tu contraseña?</h6>
+        <p class="small text-muted mb-3">
+          Ingresa el correo electrónico que registraste con tu cuenta para restablecer tu acceso:
+        </p>
+
+        <form action="/registro-padre/recuperar" method="post">
+          <input type="hidden" name="usuario_id" value="{{ usuario_existente.id }}">
+          <div class="mb-3">
+            <div class="input-group">
+              <span class="input-group-text bg-white"><i class="bi bi-envelope"></i></span>
+              <input type="email" name="email" class="form-control" placeholder="tu_correo@ejemplo.com" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-warning w-100 fw-bold shadow-sm">
+            Restablecer Contraseña
+          </button>
+        </form>
+      </div>
+
+      <div class="text-center pt-2 border-top">
+        <small class="text-muted d-block mb-2">¿Tienes problemas con tu correo o necesitas asistencia personalizada?</small>
+        <div class="d-flex justify-content-center gap-2 flex-wrap">
+          <a href="/login" class="btn btn-outline-secondary btn-sm fw-bold">Volver al Login</a>
+          <a href="https://wa.me/523332430448?text=Hola%2C%20necesito%20ayuda%20para%20recuperar%20o%20acceder%20a%20mi%20cuenta%20en%20el%20portal%20de%20K%C3%ADnder%203." target="_blank" rel="noopener noreferrer" class="btn btn-success btn-sm fw-bold">
+            <i class="bi bi-whatsapp"></i> Contactar Soporte por WhatsApp
+          </a>
+        </div>
+      </div>
+
+      <!-- CASO 2: FORMULARIO INICIAL DE BÚSQUEDA DEL ALUMNO -->
+      {% elif not alumno %}
       <form action="/registro-padre/verificar" method="post">
         <div class="mb-3">
           <label class="form-label small fw-bold">Escribe el nombre completo o apellidos de tu hijo(a)</label>
@@ -39,10 +89,9 @@
           <button type="submit" class="btn btn-primary fw-bold px-4">Verificar Alumno <i class="bi bi-arrow-right"></i></button>
         </div>
       </form>
-      {% endif %}
 
-      <!-- PASO 2: FORMULARIO DE REGISTRO Y COMPLETADO DE FICHA -->
-      {% if alumno %}
+      <!-- CASO 3: ALUMNO ENCONTRADO Y SIN TUTOR REGISTRADO (FORMULARIO DE ALTA) -->
+      {% else %}
       <div class="alert alert-success-subtle border border-success-subtle rounded-3 p-3 mb-4 d-flex align-items-center gap-2">
         <i class="bi bi-check-circle-fill text-success fs-5"></i>
         <div>

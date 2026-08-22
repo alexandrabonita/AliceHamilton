@@ -88,13 +88,13 @@ def login_page(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if user:
         return RedirectResponse(url="/")
-    return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None})
+    return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None, "mensaje": None})
 
 @app.post("/login", response_class=HTMLResponse)
 def login_post(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(models.Usuario).filter(models.Usuario.username == username.strip()).first()
     if not user or not auth.verify_password(password, user.password_hash):
-        return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": "Usuario o contraseña incorrectos"})
+        return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": "Usuario o contraseña incorrectos", "mensaje": None})
     
     request.session["user_id"] = user.id
     request.session["user_rol"] = user.rol
@@ -375,6 +375,30 @@ MODEL_MAP = {
     "avisos": models.Aviso,
     "cursos": models.CursoTaller
 }
+# --- ENDPOINT PARA RESPALDO AUTOMÁTICO (CRON / APPS SCRIPT) ---
+TOKEN_SECRETO_BACKUP = "Kinder3_Backup_Seguro_2026_ClaveSecreta"
+
+@app.get("/api/backup-automatico")
+def api_backup_automatico(token: str = "", db: Session = Depends(get_db)):
+    if token != TOKEN_SECRETO_BACKUP:
+        return JSONResponse(status_code=403, content={"error": "Acceso denegado. Token no válido."})
+
+    def modelo_a_dict(obj):
+        return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+
+    data_export = {}
+    for t_name, m_cls in MODEL_MAP.items():
+        data_export[t_name] = [modelo_a_dict(row) for row in db.query(m_cls).all()]
+
+    json_str = json.dumps(data_export, indent=2, ensure_ascii=False)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"backup_completo_{timestamp}.json"
+
+    return Response(
+        content=json_str,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.get("/soporte", response_class=HTMLResponse)
 def ver_soporte(request: Request, db: Session = Depends(get_db)):
@@ -581,9 +605,9 @@ async def resolver_sincronizacion(request: Request, db: Session = Depends(get_db
                 alumno = db.query(models.Alumno).filter(models.Alumno.id == item_id).first()
                 if alumno:
                     if decision == "sheet":
-                        setattr(alumno, campo, valor_sheet)
+                        setattr(alumno, campo, valor_sheet if valor_sheet != "(Vacío)" else "")
                     elif decision == "bd":
-                        valor_actual_bd = getattr(alumno, campo)
+                        valor_actual_bd = getattr(alumno, campo) or ""
                         cargar_datos.enviar_cambio_a_sheet({
                             "accion": "actualizar_alumno",
                             "nombre": alumno.nombre,
@@ -594,9 +618,9 @@ async def resolver_sincronizacion(request: Request, db: Session = Depends(get_db
                 evento = db.query(models.Evento).filter(models.Evento.id == item_id).first()
                 if evento:
                     if decision == "sheet":
-                        setattr(evento, campo, valor_sheet)
+                        setattr(evento, campo, valor_sheet if valor_sheet != "(Vacío)" else "")
                     elif decision == "bd":
-                        valor_actual_bd = getattr(evento, campo)
+                        valor_actual_bd = getattr(evento, campo) or ""
                         cargar_datos.enviar_cambio_a_sheet({
                             "accion": "actualizar_evento",
                             "titulo": evento.titulo,
@@ -604,10 +628,9 @@ async def resolver_sincronizacion(request: Request, db: Session = Depends(get_db
                         })
 
     db.commit()
-    cargar_datos.sincronizar_base_de_datos()
-    return RedirectResponse(url="/soporte", status_code=303)
+    return RedirectResponse(url="/soporte", status_code=status.HTTP_303_SEE_OTHER)
 
-# --- EXPORTACIÓN INDIVIDUAL POR TABLA (CONSERVA HASH DE CONTRASEÑA) ---
+# --- EXPORTACIÓN INDIVIDUAL POR TABLA ---
 
 @app.get("/admin/exportar-tabla/{tabla}")
 def exportar_tabla_individual(tabla: str, request: Request, db: Session = Depends(get_db)):
@@ -684,23 +707,24 @@ async def importar_base_datos(request: Request, archivo_json: UploadFile = File(
 
     return RedirectResponse(url="/soporte", status_code=303)
 
-# --- AUTO-REGISTRO DE PADRES DE FAMILIA ---
+# =========================================================================
+# AUTO-REGISTRO Y RECUPERACIÓN DE CONTRASEÑA DE PADRES
+# =========================================================================
 
 @app.get("/registro-padre", response_class=HTMLResponse)
 def vista_registro_padre(request: Request, db: Session = Depends(get_db)):
     user = auth.get_current_user(request, db)
     if user:
         return RedirectResponse(url="/")
-    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "error": None})
+    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "ya_registrado": False, "error": None, "mensaje": None})
 
 @app.post("/registro-padre/verificar", response_class=HTMLResponse)
 def verificar_alumno_para_registro(request: Request, nombre_hijo: str = Form(...), db: Session = Depends(get_db)):
     tokens_buscados = cargar_datos.simplificar_nombre(nombre_hijo)
     if not tokens_buscados:
-        return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "error": "Por favor escribe un nombre válido."})
+        return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": None, "ya_registrado": False, "error": "Por favor escribe un nombre válido.", "mensaje": None})
 
     todos_alumnos = db.query(models.Alumno).all()
-    # Buscar coincidencia (al menos 2 palabras clave del nombre)
     alumno_encontrado = next(
         (a for a in todos_alumnos if len(tokens_buscados.intersection(cargar_datos.simplificar_nombre(a.nombre))) >= min(2, len(tokens_buscados))),
         None
@@ -713,11 +737,82 @@ def verificar_alumno_para_registro(request: Request, nombre_hijo: str = Form(...
             context={
                 "user": None,
                 "alumno": None,
-                "error": f"No se encontró ningún alumno con el nombre '{nombre_hijo}'. Verifica la ortografía o contacta a la mesa directiva."
+                "ya_registrado": False,
+                "error": f"No se encontró ningún alumno con el nombre '{nombre_hijo}'. Verifica la ortografía o contacta a la mesa directiva.",
+                "mensaje": None
             }
         )
 
-    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": alumno_encontrado, "error": None})
+    # Validar si ya existe un usuario registrado para este tutor/alumno
+    tokens_tutor = cargar_datos.simplificar_nombre(alumno_encontrado.tutor_nombre)
+    todos_usuarios = db.query(models.Usuario).filter(models.Usuario.rol == "padre").all()
+    
+    usuario_existente = None
+    if tokens_tutor:
+        usuario_existente = next(
+            (u for u in todos_usuarios if len(tokens_tutor.intersection(cargar_datos.simplificar_nombre(u.nombre_completo))) >= min(2, len(tokens_tutor))),
+            None
+        )
+
+    # Si ya existe una cuenta de padre para este alumno, no mostrar ficha y ofrecer recuperación
+    if usuario_existente:
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={
+                "user": None,
+                "alumno": None,
+                "alumno_nombre": alumno_encontrado.nombre,
+                "ya_registrado": True,
+                "usuario_existente": usuario_existente,
+                "error": None,
+                "mensaje": None
+            }
+        )
+
+    return templates.TemplateResponse(request=request, name="registro_padre.html", context={"user": None, "alumno": alumno_encontrado, "ya_registrado": False, "error": None, "mensaje": None})
+
+@app.post("/registro-padre/recuperar", response_class=HTMLResponse)
+def recuperar_password_padre(
+    request: Request,
+    usuario_id: int = Form(...),
+    email: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    target = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not target:
+        return RedirectResponse(url="/registro-padre")
+
+    # Validar que el correo coincida con el registrado
+    if not target.email or target.email.strip().lower() != email.strip().lower():
+        return templates.TemplateResponse(
+            request=request,
+            name="registro_padre.html",
+            context={
+                "user": None,
+                "alumno": None,
+                "alumno_nombre": target.nombre_completo,
+                "ya_registrado": True,
+                "usuario_existente": target,
+                "error": "El correo ingresado no coincide con el registrado en esta cuenta. Si no lo recuerdas, contacta a Soporte TI.",
+                "mensaje": None
+            }
+        )
+
+    # Restablecer contraseña temporal al username y exigir cambio
+    target.password_hash = auth.get_password_hash(target.username)
+    target.requiere_cambio_pass = True
+    db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={
+            "user": None,
+            "error": None,
+            "mensaje": f"¡Contraseña restablecida con éxito! Tu usuario es '{target.username}' y tu contraseña temporal es tu mismo usuario. Al ingresar deberás crear una nueva."
+        }
+    )
 
 @app.post("/registro-padre/completar", response_class=HTMLResponse)
 def completar_registro_padre(
@@ -742,19 +837,18 @@ def completar_registro_padre(
     if not alumno:
         return RedirectResponse(url="/registro-padre")
 
-    # 1. Validaciones
     if password != password_confirm:
         return templates.TemplateResponse(
             request=request,
             name="registro_padre.html",
-            context={"user": None, "alumno": alumno, "error": "Las contraseñas no coinciden."}
+            context={"user": None, "alumno": alumno, "ya_registrado": False, "error": "Las contraseñas no coinciden.", "mensaje": None}
         )
 
     if len(password) < 6:
         return templates.TemplateResponse(
             request=request,
             name="registro_padre.html",
-            context={"user": None, "alumno": alumno, "error": "La contraseña debe tener al menos 6 caracteres."}
+            context={"user": None, "alumno": alumno, "ya_registrado": False, "error": "La contraseña debe tener al menos 6 caracteres.", "mensaje": None}
         )
 
     user_existente = db.query(models.Usuario).filter(models.Usuario.username == username.strip().lower()).first()
@@ -762,10 +856,9 @@ def completar_registro_padre(
         return templates.TemplateResponse(
             request=request,
             name="registro_padre.html",
-            context={"user": None, "alumno": alumno, "error": f"El nombre de usuario '{username}' ya está en uso. Elige otro."}
+            context={"user": None, "alumno": alumno, "ya_registrado": False, "error": f"El nombre de usuario '{username}' ya está en uso. Elige otro.", "mensaje": None}
         )
 
-    # 2. Crear Usuario
     nuevo_usuario = models.Usuario(
         username=username.strip().lower(),
         nombre_completo=tutor_nombre.strip(),
@@ -777,7 +870,6 @@ def completar_registro_padre(
     )
     db.add(nuevo_usuario)
 
-    # 3. Actualizar Ficha del Alumno con los datos completados
     alumno.tutor_nombre = tutor_nombre.strip()
     alumno.tutor_telefono = tutor_telefono.strip()
     alumno.alergias = alergias.strip() or "Ninguna reportada"
@@ -791,7 +883,6 @@ def completar_registro_padre(
     db.commit()
     db.refresh(nuevo_usuario)
 
-    # 4. Iniciar sesión automáticamente
     request.session["user_id"] = nuevo_usuario.id
     request.session["user_rol"] = nuevo_usuario.rol
 
